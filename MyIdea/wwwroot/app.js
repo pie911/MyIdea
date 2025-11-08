@@ -5,6 +5,7 @@ let currentTheme = localStorage.getItem('myidea_theme') || 'light';
 let selectedImages = [];
 let isAnalyzing = false;
 let DRAFT_KEY = null;
+let pendingAvatarDataURL = null; // temporary preview/save for profile avatar (image/gif/video)
 
 // Authentication Helper Functions
 function isAuthenticated() {
@@ -418,6 +419,9 @@ function loadUserData() {
 
     // Update post avatar
     document.getElementById('currentUserAvatar').src = currentUser.avatar;
+
+    // Render notifications UI for current user
+    renderNotifications();
 }
 
 function createPost(text, imageData = null, aiAnalysis = null) {
@@ -432,7 +436,11 @@ function createPost(text, imageData = null, aiAnalysis = null) {
         timestamp: new Date().toISOString(),
         likes: [],
         comments: [],
-        tags: extractTags(text)
+        tags: extractTags(text),
+        shares: 0,
+        pinned: false,
+        pinnedBy: null,
+        pinnedAt: null
     };
 
     posts.unshift(post);
@@ -475,6 +483,7 @@ function createPostElement(post) {
             <div class="post-user-info">
                 <h4>${post.userName}</h4>
                 <p>${formatTimestamp(post.timestamp)}</p>
+                ${post.pinned ? `<span class="pin-badge">Pinned</span>` : ''}
             </div>
         </div>
         <div class="post-content">
@@ -498,7 +507,10 @@ function createPostElement(post) {
                 <i class="fas fa-comment"></i> ${post.comments.length}
             </button>
             <button class="action-btn" onclick="sharePost('${post.id}')">
-                <i class="fas fa-share"></i>
+                <i class="fas fa-share"></i> ${post.shares || 0}
+            </button>
+            <button class="action-btn" onclick="togglePin('${post.id}')" title="Pin/Unpin post">
+                <i class="fas fa-thumbtack"></i>
             </button>
         </div>
     `;
@@ -529,7 +541,8 @@ function toggleLike(postId) {
     if (!post) return;
 
     const likeIndex = post.likes.indexOf(currentUser.id);
-    if (likeIndex > -1) {
+    const wasLiked = likeIndex > -1;
+    if (wasLiked) {
         post.likes.splice(likeIndex, 1);
     } else {
         post.likes.push(currentUser.id);
@@ -537,6 +550,19 @@ function toggleLike(postId) {
 
     localStorage.setItem('myidea_posts', JSON.stringify(posts));
     renderPosts();
+
+    // Notify post owner if someone else liked their post
+    if (!wasLiked && post.userId !== currentUser.id) {
+        addNotificationForUser(post.userId, {
+            id: Date.now().toString(),
+            type: 'like',
+            text: `${currentUser.name} liked your post`,
+            postId: post.id,
+            fromUserId: currentUser.id,
+            timestamp: new Date().toISOString(),
+            read: false
+        });
+    }
 }
 
 function openPostModal(postId) {
@@ -553,6 +579,7 @@ function openPostModal(postId) {
                 <div class="post-user-info">
                     <h4>${post.userName}</h4>
                     <p>${formatTimestamp(post.timestamp)}</p>
+                    ${post.pinned ? `<span class="pin-badge">Pinned</span>` : ''}
                 </div>
             </div>
             <div class="post-content">
@@ -576,7 +603,10 @@ function openPostModal(postId) {
                     <i class="fas fa-comment"></i> ${post.comments.length}
                 </button>
                 <button class="action-btn" onclick="sharePost('${post.id}')">
-                    <i class="fas fa-share"></i>
+                    <i class="fas fa-share"></i> ${post.shares || 0}
+                </button>
+                <button class="action-btn" onclick="togglePin('${post.id}')" title="Pin/Unpin post">
+                    <i class="fas fa-thumbtack"></i>
                 </button>
             </div>
         </div>
@@ -623,20 +653,65 @@ function addComment(postId) {
     localStorage.setItem('myidea_posts', JSON.stringify(posts));
     input.value = '';
     openPostModal(postId); // Refresh modal
+
+    // Notify post owner if someone else commented on their post
+    if (post.userId !== currentUser.id) {
+        addNotificationForUser(post.userId, {
+            id: Date.now().toString(),
+            type: 'comment',
+            text: `${currentUser.name} commented: ${comment.text.substring(0, 80)}`,
+            postId: post.id,
+            fromUserId: currentUser.id,
+            timestamp: new Date().toISOString(),
+            read: false
+        });
+    }
+}
+
+function togglePin(postId) {
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
+
+    // Only the author can pin/unpin their post
+    if (!currentUser || post.userId !== currentUser.id) {
+        alert('Only the post author can pin or unpin this post.');
+        return;
+    }
+
+    post.pinned = !post.pinned;
+    post.pinnedBy = post.pinned ? currentUser.id : null;
+    post.pinnedAt = post.pinned ? new Date().toISOString() : null;
+
+    localStorage.setItem('myidea_posts', JSON.stringify(posts));
+    renderPosts();
+    // If on profile page, refresh profile posts to reflect pinned ordering
+    if (window.location.pathname.includes('profile.html')) loadUserPosts();
 }
 
 function sharePost(postId) {
     const post = posts.find(p => p.id === postId);
+    if (!post) return;
+    const doAfterShare = () => {
+        post.shares = (post.shares || 0) + 1;
+        localStorage.setItem('myidea_posts', JSON.stringify(posts));
+        renderPosts();
+        trackEngagement('share', postId, {});
+    };
+
     if (navigator.share) {
         navigator.share({
             title: `Post by ${post.userName}`,
             text: post.text,
             url: window.location.href
-        });
+        }).then(() => doAfterShare()).catch(() => {/* ignore */});
     } else {
         // Fallback: copy to clipboard
-        navigator.clipboard.writeText(`${post.text} - ${window.location.href}`);
-        alert('Link copied to clipboard!');
+        navigator.clipboard.writeText(`${post.text} - ${window.location.href}`).then(() => {
+            alert('Link copied to clipboard!');
+            doAfterShare();
+        }).catch(() => {
+            alert('Could not copy link');
+        });
     }
 }
 
@@ -1056,6 +1131,49 @@ function initFeedPage() {
             closeModal();
         }
     });
+
+    // Notifications UI wiring
+    const notifBtn = document.getElementById('notifBtn');
+    const notifDropdown = document.getElementById('notifDropdown');
+    const markAllBtn = document.getElementById('markAllRead');
+    const closeNotifBtn = document.getElementById('closeNotif');
+
+    if (notifBtn) {
+        notifBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (!notifDropdown) return;
+            const isOpen = notifDropdown.style.display === 'block';
+            if (isOpen) {
+                notifDropdown.style.display = 'none';
+            } else {
+                renderNotifications();
+                notifDropdown.style.display = 'block';
+            }
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(ev) {
+            if (notifDropdown && !notifDropdown.contains(ev.target) && ev.target !== notifBtn) {
+                notifDropdown.style.display = 'none';
+            }
+        });
+    }
+
+    if (markAllBtn) {
+        markAllBtn.addEventListener('click', function() {
+            markAllNotificationsRead();
+            renderNotifications();
+        });
+    }
+
+    if (closeNotifBtn) {
+        closeNotifBtn.addEventListener('click', function() {
+            if (notifDropdown) notifDropdown.style.display = 'none';
+        });
+    }
+
+    // Initial render
+    renderNotifications();
 }
 
 function initProfilePage() {
@@ -1067,6 +1185,63 @@ function initProfilePage() {
         document.getElementById('settingsBtn').addEventListener('click', openSettingsModal);
         document.getElementById('editProfileForm').addEventListener('submit', handleEditProfile);
         document.getElementById('saveSettings').addEventListener('click', saveSettings);
+
+        // Avatar edit flow: trigger button and file input handling
+        const triggerBtn = document.getElementById('triggerEditAvatar');
+        const editAvatarInput = document.getElementById('editAvatar');
+        const avatarPreview = document.getElementById('avatarPreview');
+
+        if (triggerBtn && editAvatarInput) {
+            triggerBtn.addEventListener('click', function() { editAvatarInput.click(); });
+
+            editAvatarInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                // Validate types and sizes
+                if (file.type.startsWith('video/')) {
+                    // Load metadata to check duration
+                    const url = URL.createObjectURL(file);
+                    const v = document.createElement('video');
+                    v.preload = 'metadata';
+                    v.src = url;
+                    v.onloadedmetadata = function() {
+                        URL.revokeObjectURL(url);
+                        const duration = v.duration || 0;
+                        if (duration > 3.1) {
+                            alert('Please select a video shorter than or equal to 3 seconds.');
+                            editAvatarInput.value = '';
+                            avatarPreview.style.display = 'none';
+                            pendingAvatarDataURL = null;
+                            return;
+                        }
+
+                        const reader = new FileReader();
+                        reader.onload = function(ev) {
+                            pendingAvatarDataURL = ev.target.result;
+                            avatarPreview.style.display = 'block';
+                            avatarPreview.innerHTML = `<video class="preview-avatar" autoplay loop muted playsinline src="${pendingAvatarDataURL}"></video>`;
+                        };
+                        reader.readAsDataURL(file);
+                    };
+                    v.onerror = function() {
+                        alert('Could not read video file.');
+                        editAvatarInput.value = '';
+                    };
+                } else if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = function(ev) {
+                        pendingAvatarDataURL = ev.target.result;
+                        avatarPreview.style.display = 'block';
+                        avatarPreview.innerHTML = `<img class="preview-avatar" src="${pendingAvatarDataURL}" alt="Avatar preview">`;
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    alert('Unsupported file type. Please choose an image, GIF, or short video (<=3s).');
+                    editAvatarInput.value = '';
+                }
+            });
+        }
 
         // Tab switching
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1110,11 +1285,19 @@ function loadProfile() {
     }
 
     // Load user profile data
-    const profileAvatar = document.getElementById('profileAvatar');
+    const profileAvatarContainer = document.getElementById('profileAvatarContainer');
     const profileName = document.getElementById('profileName');
     const profileBio = document.getElementById('profileBio');
 
-    profileAvatar.src = currentUser.avatar || 'https://via.placeholder.com/120x120?text=User';
+    // Render avatar: could be image/gif or video data URL
+    if (currentUser.avatar && currentUser.avatar.startsWith('data:video')) {
+        // Render video element
+        profileAvatarContainer.innerHTML = `<video id="profileAvatarVideo" class="profile-avatar" autoplay loop muted playsinline src="${currentUser.avatar}"></video>`;
+    } else {
+        const imgSrc = currentUser.avatar || 'https://via.placeholder.com/120x120?text=User';
+        profileAvatarContainer.innerHTML = `<img id="profileAvatar" src="${imgSrc}" alt="Profile Avatar" class="profile-avatar">`;
+    }
+
     profileName.textContent = currentUser.name;
     profileBio.textContent = currentUser.bio || 'No bio yet';
 
@@ -1135,6 +1318,14 @@ function loadUserPosts() {
         userPostsContainer.innerHTML = '<p style="text-align center; color: var(--text-muted); padding: 40px;">No posts yet</p>';
         return;
     }
+
+    // Show pinned posts first
+    userPosts.sort((a,b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        // fallback to newest first
+        return new Date(b.timestamp) - new Date(a.timestamp);
+    });
 
     userPosts.forEach(post => {
         const postElement = createPostCard(post);
@@ -1184,20 +1375,18 @@ function handleEditProfile(event) {
     currentUser.name = name;
     currentUser.bio = bio;
 
-    if (avatarFile) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            currentUser.avatar = e.target.result;
-            saveUser(currentUser);
-            loadProfile();
-            closeModal();
-        };
-        reader.readAsDataURL(avatarFile);
-    } else {
-        saveUser(currentUser);
-        loadProfile();
-        closeModal();
+    // If user selected a new avatar and we have a pending dataURL, use it
+    if (pendingAvatarDataURL) {
+        currentUser.avatar = pendingAvatarDataURL;
+        pendingAvatarDataURL = null;
+        // clear file input
+        const editAvatarInput = document.getElementById('editAvatar');
+        if (editAvatarInput) editAvatarInput.value = '';
     }
+
+    saveUser(currentUser);
+    loadProfile();
+    closeModal();
 }
 
 function openSettingsModal() {
@@ -1291,6 +1480,7 @@ function createPostCard(post) {
             <div class="post-user-info">
                 <h4>${post.userName}</h4>
                 <p>${formatTimestamp(post.timestamp)}</p>
+                ${post.pinned ? `<span class="pin-badge">Pinned</span>` : ''}
             </div>
         </div>
         <div class="post-content">
@@ -1314,7 +1504,10 @@ function createPostCard(post) {
                 <i class="fas fa-comment"></i> ${post.comments.length}
             </button>
             <button class="action-btn" onclick="sharePost('${post.id}')">
-                <i class="fas fa-share"></i>
+                <i class="fas fa-share"></i> ${post.shares || 0}
+            </button>
+            <button class="action-btn" onclick="togglePin('${post.id}')" title="Pin/Unpin post">
+                <i class="fas fa-thumbtack"></i>
             </button>
         </div>
     `;
@@ -1452,6 +1645,19 @@ function addInlineComment(postId, text) {
 
     // Track engagement
     trackEngagement('comment', postId, { text: text });
+
+    // Notify post owner for inline comment
+    if (post.userId !== currentUser.id) {
+        addNotificationForUser(post.userId, {
+            id: Date.now().toString(),
+            type: 'comment',
+            text: `${currentUser.name} commented: ${comment.text.substring(0, 80)}`,
+            postId: post.id,
+            fromUserId: currentUser.id,
+            timestamp: new Date().toISOString(),
+            read: false
+        });
+    }
 }
 
 function showNotification(message, type = 'info') {
@@ -1623,6 +1829,101 @@ function trackEngagement(action, postId, details = {}) {
     const engagements = JSON.parse(localStorage.getItem('myidea_engagements')) || [];
     engagements.push(engagement);
     localStorage.setItem('myidea_engagements', JSON.stringify(engagements));
+}
+
+// Notifications helpers: persisted per-user in localStorage
+function getNotificationsForUser(userId) {
+    try {
+        const raw = localStorage.getItem(`myidea_notifications_${userId}`);
+        if (!raw) return [];
+        return JSON.parse(raw);
+    } catch (err) {
+        console.error('Failed to read notifications', err);
+        return [];
+    }
+}
+
+function saveNotificationsForUser(userId, notifications) {
+    try {
+        localStorage.setItem(`myidea_notifications_${userId}`, JSON.stringify(notifications || []));
+    } catch (err) {
+        console.error('Failed to save notifications', err);
+    }
+}
+
+function addNotificationForUser(userId, notification) {
+    if (!userId || !notification) return;
+    const notifs = getNotificationsForUser(userId);
+    notifs.unshift(notification);
+    // keep a reasonable cap
+    if (notifs.length > 200) notifs.length = 200;
+    saveNotificationsForUser(userId, notifs);
+    // If the current logged-in user is the recipient, update UI
+    if (currentUser && currentUser.id === userId) renderNotifications();
+}
+
+function markAllNotificationsRead() {
+    if (!currentUser) return;
+    const notifs = getNotificationsForUser(currentUser.id);
+    const updated = notifs.map(n => ({ ...n, read: true }));
+    saveNotificationsForUser(currentUser.id, updated);
+}
+
+function renderNotifications() {
+    const notifCountEl = document.getElementById('notifCount');
+    const notifListEl = document.getElementById('notifList');
+    if (!currentUser) {
+        if (notifCountEl) notifCountEl.style.display = 'none';
+        if (notifListEl) notifListEl.innerHTML = '<li style="padding:10px; color:var(--text-muted)">Sign in to see notifications</li>';
+        return;
+    }
+
+    const notifs = getNotificationsForUser(currentUser.id);
+    const unread = notifs.filter(n => !n.read).length;
+    if (notifCountEl) {
+        if (unread > 0) {
+            notifCountEl.style.display = 'inline-block';
+            notifCountEl.textContent = unread;
+        } else {
+            notifCountEl.style.display = 'none';
+        }
+    }
+
+    if (!notifListEl) return;
+
+    if (notifs.length === 0) {
+        notifListEl.innerHTML = '<li style="padding:10px; color:var(--text-muted)">No notifications</li>';
+        return;
+    }
+
+    notifListEl.innerHTML = '';
+    notifs.forEach(n => {
+        const li = document.createElement('li');
+        li.className = `notif-item ${n.read ? '' : 'unread'}`;
+        const time = formatTimestamp(n.timestamp);
+        li.innerHTML = `
+            <div class="notif-text">${n.text}</div>
+            <div class="notif-time">${time}</div>
+        `;
+        li.addEventListener('click', function() {
+            // Mark single notification read
+            const all = getNotificationsForUser(currentUser.id);
+            const idx = all.findIndex(x => x.id === n.id);
+            if (idx > -1) {
+                all[idx].read = true;
+                saveNotificationsForUser(currentUser.id, all);
+                renderNotifications();
+            }
+            // Navigate to the related post if available
+            if (n.postId) {
+                openPostModal(n.postId);
+                const dropdown = document.getElementById('notifDropdown');
+                if (dropdown) dropdown.style.display = 'none';
+            }
+        });
+
+        notifListEl.appendChild(li);
+    });
 }
 
 // Initialize advanced features

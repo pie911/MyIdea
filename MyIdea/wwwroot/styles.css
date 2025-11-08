@@ -54,12 +54,14 @@ body {
     justify-content: center;
     background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
     position: relative;
-    overflow: hidden;
+    /* allow page to scroll on short viewports (avoid hiding content behind browser UI) */
+    overflow: auto;
 }
 
 .auth-container {
     width: 100%;
-    max-width: 400px;
+    /* slightly wider on desktop for better form spacing */
+    max-width: 520px;
     padding: 0 20px;
     z-index: 2;
 }
@@ -68,7 +70,10 @@ body {
     background: var(--bg-primary);
     border-radius: var(--border-radius-large);
     box-shadow: var(--shadow-hover);
-    padding: 40px;
+    padding: 32px;
+    /* Ensure card can scroll if the viewport height is small (mobile browser chrome) */
+    max-height: calc(100vh - 48px);
+    overflow: auto;
     text-align: center;
 }
 
