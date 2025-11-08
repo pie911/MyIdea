@@ -4,6 +4,7 @@ let posts = JSON.parse(localStorage.getItem('myidea_posts')) || [];
 let currentTheme = localStorage.getItem('myidea_theme') || 'light';
 let selectedImages = [];
 let isAnalyzing = false;
+let DRAFT_KEY = null;
 
 // Authentication Helper Functions
 function isAuthenticated() {
@@ -460,11 +461,14 @@ function renderPosts() {
         const postElement = createPostElement(post);
         container.appendChild(postElement);
     });
+    // Observe posts for optimized scroll effects
+    observePosts();
 }
 
 function createPostElement(post) {
     const postDiv = document.createElement('div');
     postDiv.className = 'post-card';
+    postDiv.setAttribute('data-post-id', post.id);
     postDiv.innerHTML = `
         <div class="post-header">
             <img src="${post.userAvatar}" alt="${post.userName}" class="post-user-avatar">
@@ -490,7 +494,7 @@ function createPostElement(post) {
             <button class="action-btn" onclick="toggleLike('${post.id}')">
                 <i class="fas fa-heart"></i> ${post.likes.length}
             </button>
-            <button class="action-btn" onclick="openPostModal('${post.id}')">
+            <button class="action-btn" onclick="toggleCommentBox('${post.id}')">
                 <i class="fas fa-comment"></i> ${post.comments.length}
             </button>
             <button class="action-btn" onclick="sharePost('${post.id}')">
@@ -498,6 +502,11 @@ function createPostElement(post) {
             </button>
         </div>
     `;
+    // Click on card (except action buttons) opens modal
+    postDiv.addEventListener('click', function(e) {
+        if (e.target.closest('.action-btn') || e.target.closest('.remove-image')) return;
+        openPostModal(post.id);
+    });
     return postDiv;
 }
 
@@ -639,14 +648,32 @@ async function handleImageUpload(event) {
     selectedImages = [];
     const preview = document.getElementById('imagePreview');
     preview.innerHTML = '';
+    // Read UI options
+    const formatSelect = document.getElementById('imageFormat');
+    const maxDimSelect = document.getElementById('imageMaxDim');
+    const autoResize = document.getElementById('autoResize')?.checked;
+    const mimeType = formatSelect ? formatSelect.value : 'image/jpeg';
+    const maxDim = maxDimSelect ? parseInt(maxDimSelect.value, 10) || 0 : 0;
 
     for (let i = 0; i < Math.min(files.length, 5); i++) {
         const file = files[i];
         if (!file.type.startsWith('image/')) continue;
 
         const reader = new FileReader();
-        reader.onload = function(e) {
-            const imageData = e.target.result;
+        reader.onload = async function(e) {
+            let imageData = e.target.result;
+
+            // Validate and optionally resize/convert
+            try {
+                if (autoResize && maxDim > 0) {
+                    imageData = await resizeImage(imageData, maxDim, mimeType, 0.85);
+                } else if (mimeType && mimeType !== file.type) {
+                    imageData = await convertImageFormat(imageData, mimeType, 0.9);
+                }
+            } catch (err) {
+                console.warn('Image resize/convert failed, using original', err);
+            }
+
             selectedImages.push(imageData);
 
             const imageItem = document.createElement('div');
@@ -656,6 +683,7 @@ async function handleImageUpload(event) {
                 <button class="remove-image" onclick="removeImage(${i})">&times;</button>
             `;
             preview.appendChild(imageItem);
+            updatePostButton();
         };
         reader.readAsDataURL(file);
     }
@@ -700,6 +728,113 @@ function removeImage(index) {
     });
 
     updatePostButton();
+}
+
+// Image helpers: resize and convert formats
+function resizeImage(dataUrl, maxDim, mimeType = 'image/jpeg', quality = 0.9) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = function() {
+            let { width, height } = img;
+            if (!maxDim || (width <= maxDim && height <= maxDim)) {
+                // No need to resize, but maybe convert
+                if (mimeType === 'image/png' || mimeType === 'image/jpeg' || mimeType === 'image/webp') {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    try {
+                        resolve(canvas.toDataURL(mimeType, quality));
+                    } catch (err) {
+                        resolve(dataUrl);
+                    }
+                } else {
+                    resolve(dataUrl);
+                }
+                return;
+            }
+
+            // Determine new size preserving aspect ratio
+            if (width > height) {
+                const ratio = maxDim / width;
+                width = maxDim;
+                height = Math.round(height * ratio);
+            } else {
+                const ratio = maxDim / height;
+                height = maxDim;
+                width = Math.round(width * ratio);
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            try {
+                resolve(canvas.toDataURL(mimeType, quality));
+            } catch (err) {
+                reject(err);
+            }
+        };
+        img.onerror = reject;
+        img.src = dataUrl;
+    });
+}
+
+function convertImageFormat(dataUrl, mimeType = 'image/jpeg', quality = 0.9) {
+    // Simple wrapper that draws to canvas and exports in desired format
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = function() {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            try {
+                resolve(canvas.toDataURL(mimeType, quality));
+            } catch (err) {
+                reject(err);
+            }
+        };
+        img.onerror = reject;
+        img.src = dataUrl;
+    });
+}
+
+// Draft management
+function saveDraft() {
+    try {
+        const text = document.getElementById('postText').value;
+        const image = selectedImages.length > 0 ? selectedImages[0] : null;
+        const draft = { text, image, savedAt: new Date().toISOString() };
+        if (!DRAFT_KEY) DRAFT_KEY = 'myidea_draft_guest';
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+        showNotification('Draft saved', 'success');
+    } catch (err) {
+        console.error('Save draft failed', err);
+        showNotification('Failed to save draft', 'error');
+    }
+}
+
+function loadDraft() {
+    try {
+        if (!DRAFT_KEY) DRAFT_KEY = currentUser ? `myidea_draft_${currentUser.id}` : 'myidea_draft_guest';
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (!raw) return;
+        const draft = JSON.parse(raw);
+        if (draft.text) document.getElementById('postText').value = draft.text;
+        if (draft.image) {
+            selectedImages = [draft.image];
+            const preview = document.getElementById('imagePreview');
+            preview.innerHTML = `<div class="image-item"><img src="${draft.image}" alt="Draft"><button class="remove-image" onclick="removeImage(0)">&times;</button></div>`;
+            updatePostButton();
+        }
+        if (draft.text || draft.image) showNotification('Loaded saved draft', 'info');
+    } catch (err) {
+        console.error('Load draft failed', err);
+    }
 }
 
 // Auth Form Handlers
@@ -845,6 +980,10 @@ function initFeedPage() {
         updateThemeIcon();
     }
 
+    // Prepare draft storage key for current user and load any saved draft
+    DRAFT_KEY = currentUser ? `myidea_draft_${currentUser.id}` : 'myidea_draft_guest';
+    loadDraft();
+
     // Feed page event listeners
     const postText = document.getElementById('postText');
     const postBtn = document.getElementById('postBtn');
@@ -874,6 +1013,8 @@ function initFeedPage() {
                 delete document.getElementById('imagePreview').dataset.aiAnalysis;
                 updatePostButton();
                 renderPosts();
+                // Remove saved draft after posting
+                if (DRAFT_KEY) localStorage.removeItem(DRAFT_KEY);
             }
         });
     }
@@ -887,6 +1028,10 @@ function initFeedPage() {
     if (imageInput) {
         imageInput.addEventListener('change', handleImageUpload);
     }
+
+    // Wire save draft button
+    const saveDraftBtn = document.getElementById('saveDraftBtn');
+    if (saveDraftBtn) saveDraftBtn.addEventListener('click', saveDraft);
 
     if (themeToggle) {
         themeToggle.addEventListener('click', toggleTheme);
@@ -995,6 +1140,8 @@ function loadUserPosts() {
         const postElement = createPostCard(post);
         userPostsContainer.appendChild(postElement);
     });
+    // Observe posts on profile page as well
+    observePosts();
 }
 
 function updateProfileStats() {
@@ -1137,6 +1284,7 @@ function loadSavedPosts() {
 function createPostCard(post) {
     const postDiv = document.createElement('div');
     postDiv.className = 'post-card';
+    postDiv.setAttribute('data-post-id', post.id);
     postDiv.innerHTML = `
         <div class="post-header">
             <img src="${post.userAvatar}" alt="${post.userName}" class="post-user-avatar">
@@ -1162,7 +1310,7 @@ function createPostCard(post) {
             <button class="action-btn" onclick="toggleLike('${post.id}')">
                 <i class="fas fa-heart"></i> ${post.likes.length}
             </button>
-            <button class="action-btn" onclick="openPostModal('${post.id}')">
+            <button class="action-btn" onclick="toggleCommentBox('${post.id}')">
                 <i class="fas fa-comment"></i> ${post.comments.length}
             </button>
             <button class="action-btn" onclick="sharePost('${post.id}')">
@@ -1170,6 +1318,11 @@ function createPostCard(post) {
             </button>
         </div>
     `;
+    // Make the card clickable to open modal, but avoid action button clicks
+    postDiv.addEventListener('click', function(e) {
+        if (e.target.closest('.action-btn') || e.target.closest('.remove-image')) return;
+        openPostModal(post.id);
+    });
     return postDiv;
 }
 
@@ -1186,6 +1339,119 @@ function initRealTimeUpdates() {
             }
         }
     }, 30000); // Check every 30 seconds
+}
+
+// IntersectionObserver to optimize scroll and add subtle in-view effect
+let postObserver = null;
+function observePosts() {
+    if (postObserver) postObserver.disconnect();
+    const options = { root: null, rootMargin: '0px', threshold: 0.12 };
+    postObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            const el = entry.target;
+            if (entry.isIntersecting) {
+                el.classList.add('in-view');
+            } else {
+                el.classList.remove('in-view');
+            }
+        });
+    }, options);
+
+    document.querySelectorAll('.post-card').forEach(card => postObserver.observe(card));
+}
+
+// Toggle an inline comment box under the post and focus it
+function toggleCommentBox(postId) {
+    const postDiv = document.querySelector(`[data-post-id="${postId}"]`);
+    if (!postDiv) {
+        // fallback: open modal
+        openPostModal(postId);
+        return;
+    }
+
+    // If there's already a comment box, remove it
+    const existing = postDiv.querySelector('.comment-box');
+    if (existing) {
+        existing.remove();
+        return;
+    }
+
+    // Create comment box
+    const box = document.createElement('div');
+    box.className = 'comment-box';
+
+    const inputWrap = document.createElement('div');
+    inputWrap.className = 'comment-input';
+
+    const textarea = document.createElement('textarea');
+    textarea.placeholder = 'Write a comment... (Enter to post, Shift+Enter for newline)';
+    textarea.maxLength = 500;
+    textarea.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            addInlineComment(postId, textarea.value.trim());
+        }
+    });
+
+    const sendBtn = document.createElement('button');
+    sendBtn.className = 'comment-send';
+    sendBtn.textContent = 'Send';
+    sendBtn.addEventListener('click', function() { addInlineComment(postId, textarea.value.trim()); });
+
+    inputWrap.appendChild(textarea);
+    box.appendChild(inputWrap);
+    box.appendChild(sendBtn);
+
+    postDiv.appendChild(box);
+
+    // Scroll into view smoothly and focus
+    postDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => textarea.focus(), 400);
+}
+
+function addInlineComment(postId, text) {
+    if (!text) return;
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
+
+    const comment = {
+        id: Date.now().toString(),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        text: text,
+        timestamp: new Date().toISOString()
+    };
+
+    post.comments.push(comment);
+    localStorage.setItem('myidea_posts', JSON.stringify(posts));
+
+    // Update the UI: append comment visually and update count
+    const postDiv = document.querySelector(`[data-post-id="${postId}"]`);
+    if (postDiv) {
+        // remove comment box and re-render a small comment preview
+        const box = postDiv.querySelector('.comment-box');
+        if (box) box.remove();
+
+        // Update the comments count in action button
+        const actionBtns = postDiv.querySelectorAll('.action-btn');
+        actionBtns.forEach(btn => {
+            if (btn.innerHTML.includes('fa-comment')) {
+                btn.innerHTML = `<i class="fas fa-comment"></i> ${post.comments.length}`;
+            }
+            if (btn.innerHTML.includes('fa-heart')) {
+                btn.innerHTML = `<i class="fas fa-heart"></i> ${post.likes.length}`;
+            }
+        });
+
+        // Optionally show a small inline comment preview
+        const preview = document.createElement('div');
+        preview.className = 'comment-preview';
+        preview.innerHTML = `<strong>${comment.userName}:</strong> ${comment.text}`;
+        postDiv.appendChild(preview);
+    }
+
+    // Track engagement
+    trackEngagement('comment', postId, { text: text });
 }
 
 function showNotification(message, type = 'info') {
@@ -1381,3 +1647,5 @@ window.removeImage = removeImage;
 window.followUser = followUser;
 window.unfollowUser = unfollowUser;
 window.switchTab = switchTab;
+window.toggleCommentBox = toggleCommentBox;
+window.addInlineComment = addInlineComment;
