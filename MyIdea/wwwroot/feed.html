@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyIdea - Feed</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles_feed.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h1>MyIdea</h1>
+            </div>
+            <div class="nav-links">
+                <a href="feed.html" class="nav-link active">
+                    <i class="fas fa-home"></i> Feed
+                </a>
+                <a href="profile.html" class="nav-link">
+                    <i class="fas fa-user"></i> Profile
+                </a>
+                <button id="themeToggle" class="theme-toggle">
+                    <i class="fas fa-moon theme-icon"></i>
+                </button>
+                <button id="logoutBtn" class="logout-btn">Logout</button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        <div class="container">
+            <div class="feed-layout">
+                <aside class="sidebar">
+                    <div class="user-card">
+                        <img id="userAvatar" src="" alt="Avatar" class="user-avatar">
+                        <h3 id="userName"></h3>
+                        <p id="userBio"></p>
+                    </div>
+                    <div class="stats">
+                        <div class="stat">
+                            <span class="stat-number" id="postsCount">0</span>
+                            <span class="stat-label">Posts</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-number" id="followersCount">0</span>
+                            <span class="stat-label">Followers</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-number" id="followingCount">0</span>
+                            <span class="stat-label">Following</span>
+                        </div>
+                    </div>
+                </aside>
+
+                <div class="feed-main">
+                    <div class="create-post">
+                        <div class="post-input">
+                            <img id="currentUserAvatar" src="" alt="Your avatar" class="post-avatar">
+                            <div class="post-form">
+                                <textarea id="postText" placeholder="Share your idea..." rows="3"></textarea>
+                                <div class="post-actions">
+                                    <div class="file-upload">
+                                        <input type="file" id="imageInput" accept="image/*" multiple style="display: none;">
+                                        <button id="uploadBtn" class="upload-btn">
+                                            <i class="fas fa-images"></i> Add Images
+                                        </button>
+                                        <div id="imagePreview" class="image-preview"></div>
+                                    </div>
+                                    <button id="postBtn" class="post-btn" disabled>Post</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="postsContainer" class="posts-container">
+                        <!-- Posts will be dynamically added here -->
+                    </div>
+                </div>
+
+                <aside class="sidebar-right">
+                    <div class="trending">
+                        <h3>Trending Ideas</h3>
+                        <div class="trending-tags">
+                            <span class="tag">#Creativity</span>
+                            <span class="tag">#Innovation</span>
+                            <span class="tag">#Design</span>
+                            <span class="tag">#Technology</span>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </main>
+
+    <!-- Post Modal -->
+    <div id="postModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>View Post</h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div id="modalPostContent" class="modal-body">
+                <!-- Post content will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Progress Modal -->
+    <div id="progressModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Analyzing Images...</h3>
+            </div>
+            <div class="modal-body">
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div id="progressFill" class="progress-fill"></div>
+                    </div>
+                    <p id="progressText">Initializing analysis...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

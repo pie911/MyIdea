@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyIdea - Profile</title>
+    <link rel="stylesheet" href="styles_feed.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <h1>MyIdea</h1>
+            </div>
+            <div class="nav-links">
+                <a href="feed.html" class="nav-link">
+                    <i class="fas fa-home"></i> Feed
+                </a>
+                <a href="profile.html" class="nav-link active">
+                    <i class="fas fa-user"></i> Profile
+                </a>
+                <button id="themeToggle" class="theme-toggle">
+                    <i class="fas fa-moon theme-icon"></i>
+                </button>
+                <button id="logoutBtn" class="logout-btn">Logout</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="container">
+            <!-- Profile Header -->
+            <div class="profile-header">
+                <div class="profile-cover">
+                    <div class="profile-avatar-container">
+                        <img id="profileAvatar" src="" alt="Profile Avatar" class="profile-avatar">
+                        <button class="edit-avatar-btn">
+                            <i class="fas fa-camera"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="profile-info">
+                    <h1 id="profileName">User Name</h1>
+                    <p id="profileBio">No bio yet</p>
+                    <div class="profile-stats">
+                        <div class="stat">
+                            <span class="stat-number" id="profilePosts">0</span>
+                            <span class="stat-label">Posts</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-number" id="profileFollowers">0</span>
+                            <span class="stat-label">Followers</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-number" id="profileFollowing">0</span>
+                            <span class="stat-label">Following</span>
+                        </div>
+                    </div>
+                    <div class="profile-actions">
+                        <button id="editProfileBtn" class="btn-primary">
+                            <i class="fas fa-edit"></i> Edit Profile
+                        </button>
+                        <button id="settingsBtn" class="btn-secondary">
+                            <i class="fas fa-cog"></i> Settings
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Profile Content -->
+            <div class="profile-content">
+                <div class="content-tabs">
+                    <button class="tab-btn active" data-tab="posts">Posts</button>
+                    <button class="tab-btn" data-tab="liked">Liked</button>
+                    <button class="tab-btn" data-tab="saved">Saved</button>
+                </div>
+
+                <div id="postsTab" class="tab-content active">
+                    <div id="userPosts" class="posts-grid">
+                        <!-- User posts will be loaded here -->
+                    </div>
+                </div>
+
+                <div id="likedTab" class="tab-content">
+                    <div id="likedPosts" class="posts-grid">
+                        <!-- Liked posts will be loaded here -->
+                    </div>
+                </div>
+
+                <div id="savedTab" class="tab-content">
+                    <div id="savedPosts" class="posts-grid">
+                        <!-- Saved posts will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Profile Modal -->
+    <div id="editProfileModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Edit Profile</h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="editProfileForm">
+                    <div class="form-group">
+                        <label for="editName">Full Name</label>
+                        <input type="text" id="editName" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="editBio">Bio</label>
+                        <textarea id="editBio" rows="3" placeholder="Tell us about yourself..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="editAvatar">Profile Picture</label>
+                        <input type="file" id="editAvatar" accept="image/*">
+                        <div id="avatarPreview" class="image-preview" style="display: none;"></div>
+                    </div>
+                    <button type="submit" class="btn-primary">Save Changes</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Settings</h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h4>Privacy</h4>
+                    <label class="setting-item">
+                        <input type="checkbox" id="privateAccount">
+                        Private Account
+                    </label>
+                    <label class="setting-item">
+                        <input type="checkbox" id="showOnlineStatus">
+                        Show Online Status
+                    </label>
+                </div>
+                <div class="settings-section">
+                    <h4>Notifications</h4>
+                    <label class="setting-item">
+                        <input type="checkbox" id="emailNotifications" checked>
+                        Email Notifications
+                    </label>
+                    <label class="setting-item">
+                        <input type="checkbox" id="pushNotifications" checked>
+                        Push Notifications
+                    </label>
+                </div>
+                <div class="settings-section">
+                    <h4>Theme</h4>
+                    <select id="themeSelect">
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                        <option value="auto">Auto</option>
+                    </select>
+                </div>
+                <button id="saveSettings" class="btn-primary">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

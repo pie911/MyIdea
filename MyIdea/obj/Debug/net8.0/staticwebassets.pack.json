@@ -1,0 +1,85 @@
+{
+  "Files": [
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\bin\\Debug\\net8.0\\wwwroot\\_framework\\blazor.webassembly.js",
+      "PackagePath": "staticwebassets\\_framework\\blazor.webassembly.js"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\obj\\Debug\\net8.0\\compressed\\o7dk1ti0tw.gz",
+      "PackagePath": "staticwebassets\\_framework\\blazor.webassembly.js.gz"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\obj\\Debug\\net8.0\\scopedcss\\bundle\\MyIdea.styles.css",
+      "PackagePath": "staticwebassets\\MyIdea.styles.css"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\app.js",
+      "PackagePath": "staticwebassets\\app.js"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\css\\app.css",
+      "PackagePath": "staticwebassets\\css\\app.css"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\css\\bootstrap\\bootstrap.min.css",
+      "PackagePath": "staticwebassets\\css\\bootstrap\\bootstrap.min.css"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\css\\bootstrap\\bootstrap.min.css.map",
+      "PackagePath": "staticwebassets\\css\\bootstrap\\bootstrap.min.css.map"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\favicon.png",
+      "PackagePath": "staticwebassets\\favicon.png"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\feed.html",
+      "PackagePath": "staticwebassets\\feed.html"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\icon-192.png",
+      "PackagePath": "staticwebassets\\icon-192.png"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\index.html",
+      "PackagePath": "staticwebassets\\index.html"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\login.html",
+      "PackagePath": "staticwebassets\\login.html"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\profile.html",
+      "PackagePath": "staticwebassets\\profile.html"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\sample-data\\weather.json",
+      "PackagePath": "staticwebassets\\sample-data\\weather.json"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\styles.css",
+      "PackagePath": "staticwebassets\\styles.css"
+    },
+    {
+      "Id": "C:\\Users\\yashv\\MyIdea\\MyIdea\\wwwroot\\styles_feed.css",
+      "PackagePath": "staticwebassets\\styles_feed.css"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.MyIdea.Microsoft.AspNetCore.StaticWebAssets.props",
+      "PackagePath": "build\\Microsoft.AspNetCore.StaticWebAssets.props"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.build.MyIdea.props",
+      "PackagePath": "build\\MyIdea.props"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.buildMultiTargeting.MyIdea.props",
+      "PackagePath": "buildMultiTargeting\\MyIdea.props"
+    },
+    {
+      "Id": "obj\\Debug\\net8.0\\staticwebassets\\msbuild.buildTransitive.MyIdea.props",
+      "PackagePath": "buildTransitive\\MyIdea.props"
+    }
+  ],
+  "ElementsToRemove": []
+}
