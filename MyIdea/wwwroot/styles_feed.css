@@ -918,3 +918,156 @@
         height: 80px;
     }
 }
+
+/* Threaded comments / timeline visualization */
+.comments-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
+}
+.comments-timeline .comment {
+    position: relative;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+.comment-head { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+.comment-head .comment-time { color: var(--text-secondary); font-size: 0.82rem; margin-left:6px; }
+.comment-body { color: var(--text-primary); margin-bottom:6px; white-space:pre-wrap; }
+.comment-actions { display:flex; gap:8px; }
+.link-btn { background: transparent; border: none; color: var(--accent-color); cursor: pointer; padding:4px; font-size:0.9rem; }
+.replies-container { margin-top: 6px; display:flex; flex-direction:column; gap:6px; }
+.reply-box { margin-top:8px; display:flex; gap:8px; align-items:center; }
+.reply-box input { flex:1; padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-primary); color:var(--text-primary); }
+.reply-box button { padding:6px 10px; border-radius:8px; border:none; background:var(--primary-color); color:white; cursor:pointer; }
+
+/* Indentation visual: small left border per depth */
+.comment { box-shadow: none; }
+.comment[data-depth='1'] { border-left: 3px solid rgba(0,0,0,0.06); }
+.comment[data-depth='2'] { border-left: 4px solid rgba(0,0,0,0.08); }
+.comment[data-depth='3'] { border-left: 5px solid rgba(0,0,0,0.1); }
+
+@media (max-width: 720px) {
+    .comments-timeline .comment { padding: 8px; }
+}
+
+/* Timeline marker (dot + vertical connector) */
+.timeline-marker {
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    bottom: 8px;
+    width: 12px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    pointer-events: none;
+}
+.timeline-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.03);
+    z-index: 2;
+}
+.timeline-line {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 18px;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.06), rgba(0,0,0,0.02));
+    z-index: 1;
+}
+
+/* Make sure the comment wrapper has space for the marker */
+.comments-timeline .comment { padding-left: 32px; }
+
+/* Slightly fade the connector on deeper levels for visual variety */
+.comment[data-depth='1'] .timeline-line { opacity: 0.9; }
+.comment[data-depth='2'] .timeline-line { opacity: 0.75; }
+.comment[data-depth='3'] .timeline-line { opacity: 0.6; }
+
+/* Vertical spine running the whole timeline column */
+.comments-timeline { position: relative; }
+.comments-timeline::before {
+    content: '';
+    position: absolute;
+    left: 18px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: linear-gradient(180deg, rgba(0,0,0,0.04), rgba(0,0,0,0.01));
+    z-index: 0;
+    border-radius: 2px;
+}
+
+/* Pulse animation for the dot on hover */
+@keyframes dot-pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.35); opacity: 0.85; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* Hover states: pulse dot and highlight connector */
+.comment:hover .timeline-dot { animation: dot-pulse 800ms ease-in-out 1; box-shadow: 0 0 0 6px rgba(0,0,0,0.04); }
+.comment:hover .timeline-line { background: linear-gradient(180deg, rgba(0,120,212,0.28), rgba(0,120,212,0.12)); }
+
+/* Color by event type */
+.comment[data-event='comment'] .timeline-dot { background: var(--primary-color); }
+.comment[data-event='reply'] .timeline-dot { background: var(--accent-color, #7c4dff); }
+.comment[data-event='reply'] .timeline-dot { box-shadow: 0 0 0 3px rgba(124,77,255,0.08); }
+
+/* Make marker stand out above the spine */
+.timeline-marker { z-index: 2; }
+
+/* Dark-mode neon tweaks for dropdowns and image format controls */
+[data-theme="dark"] .upload-options label,
+[data-theme="dark"] .upload-options select,
+[data-theme="dark"] #imageFormat,
+[data-theme="dark"] #imageMaxDim,
+[data-theme="dark"] .upload-options .small {
+    color: #00b3ff; /* neon dark-blue */
+    font-weight: 600;
+}
+
+[data-theme="dark"] .upload-options select,
+[data-theme="dark"] #imageFormat,
+[data-theme="dark"] #imageMaxDim {
+    background: #1e2226;
+    border: 1px solid rgba(0,179,255,0.18);
+    color: #00b3ff;
+    font-size: 0.95rem;
+    padding: 6px 8px;
+}
+
+[data-theme="dark"] .notif-dropdown {
+    background: #121216;
+    border: 1px solid rgba(0,179,255,0.08);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+}
+
+[data-theme="dark"] .notif-item { border-bottom-color: rgba(255,255,255,0.03); }
+[data-theme="dark"] .notif-item .notif-text,
+[data-theme="dark"] .notif-item .notif-time {
+    color: #cfeeff; /* lighter neon tint */
+}
+
+[data-theme="dark"] .notif-item.unread { background: linear-gradient(90deg, rgba(0,179,255,0.06), transparent); }
+
+/* Image type / preview text styles in dark mode */
+[data-theme="dark"] .image-preview,
+[data-theme="dark"] .image-item img {
+    border-color: rgba(0,179,255,0.06);
+}
+
+[data-theme="dark"] .image-item img { box-shadow: 0 4px 18px rgba(0,179,255,0.04); }
+
+[data-theme="dark"] .upload-options label.small {
+    color: #8fe6ff;
+    font-size: 0.9rem;
+}

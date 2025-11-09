@@ -1,11 +1,61 @@
-let currentUser = null;
-let users = JSON.parse(localStorage.getItem('myidea_users')) || [];
-let posts = JSON.parse(localStorage.getItem('myidea_posts')) || [];
-let currentTheme = localStorage.getItem('myidea_theme') || 'light';
-let selectedImages = [];
-let isAnalyzing = false;
-let DRAFT_KEY = null;
-let pendingAvatarDataURL = null; // temporary preview/save for profile avatar (image/gif/video)
+// Global state management
+const AppState = {
+    currentUser: null,
+    users: [],
+    posts: [],
+    currentTheme: 'light',
+    selectedImages: [],
+    isAnalyzing: false,
+    DRAFT_KEY: null,
+    pendingAvatarDataURL: null,
+
+    init() {
+        try {
+            this.users = JSON.parse(localStorage.getItem('myidea_users')) || [];
+            this.posts = JSON.parse(localStorage.getItem('myidea_posts')) || [];
+            this.currentTheme = localStorage.getItem('myidea_theme') || 'light';
+            const session = this.getSession();
+            if (session && session.user) {
+                this.currentUser = session.user;
+            }
+        } catch (error) {
+            console.error('Failed to initialize app state:', error);
+            // Reset to defaults
+            this.users = [];
+            this.posts = [];
+            this.currentTheme = 'light';
+        }
+    },
+
+    getSession() {
+        const session = localStorage.getItem('myidea_session');
+        if (!session) return null;
+        try {
+            const parsed = JSON.parse(session);
+            if (Date.now() > parsed.expires) {
+                localStorage.removeItem('myidea_session');
+                return null;
+            }
+            return parsed;
+        } catch {
+            return null;
+        }
+    },
+
+    saveState() {
+        try {
+            localStorage.setItem('myidea_users', JSON.stringify(this.users));
+            localStorage.setItem('myidea_posts', JSON.stringify(this.posts));
+            localStorage.setItem('myidea_theme', this.currentTheme);
+        } catch (error) {
+            console.error('Failed to save app state:', error);
+            showNotification('Failed to save changes. Please try again.', 'error');
+        }
+    }
+};
+
+// Initialize app state
+AppState.init();
 
 // Authentication Helper Functions
 function isAuthenticated() {
@@ -19,10 +69,33 @@ function isAuthenticated() {
 
 function getCurrentUser() {
     if (currentUser) return currentUser;
+    
+    // Try to get from secure session first
+    const session = getSecureSession();
+    if (session) {
+        currentUser = session;
+        return currentUser;
+    }
+
+    // Fallback to localStorage
     const saved = localStorage.getItem('myidea_currentUser');
     if (saved) {
-        currentUser = JSON.parse(saved);
-        return currentUser;
+        try {
+            currentUser = JSON.parse(saved);
+            // Validate user data
+            if (!currentUser.id || !currentUser.name || !currentUser.email) {
+                throw new Error('Invalid user data');
+            }
+            // Ensure avatar exists
+            if (!currentUser.avatar) {
+                currentUser.avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.name)}&background=random`;
+            }
+            return currentUser;
+        } catch (err) {
+            console.error('Invalid user data, clearing...', err);
+            localStorage.removeItem('myidea_currentUser');
+            return null;
+        }
     }
     return null;
 }
@@ -44,14 +117,18 @@ function applyTheme(theme = currentTheme) {
 }
 
 // Initialize app when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-    // Check authentication and redirect if needed
-    if (!isAuthenticated()) {
-        if (window.location.pathname.includes('feed.html') || window.location.pathname.includes('profile.html')) {
-            window.location.href = 'login.html';
-            return;
+async function initializeApp() {
+    try {
+        // Normalize legacy comments data shape
+        await normalizeCommentsData();
+
+        // Check authentication and redirect if needed
+        if (!isAuthenticated()) {
+            if (window.location.pathname.includes('feed.html') || window.location.pathname.includes('profile.html')) {
+                window.location.href = 'login.html';
+                return;
+            }
         }
-    }
 
     // Initialize theme
     applyTheme();
@@ -74,9 +151,51 @@ function setTheme(theme) {
     updateThemeIcon();
 }
 
+// Ensure all posts/comments have the expected nested replies array shape.
+function normalizeCommentsData() {
+    try {
+        let changed = false;
+        posts = getPosts(); // refresh from storage
+        if (!Array.isArray(posts)) return;
+
+        posts.forEach(post => {
+            if (!post.comments) { post.comments = []; changed = true; }
+            // Walk existing comments recursively and ensure replies arrays
+            function walk(cList) {
+                cList.forEach(c => {
+                    if (!('replies' in c) || !Array.isArray(c.replies)) { c.replies = []; changed = true; }
+                    if (c.replies && c.replies.length) walk(c.replies);
+                });
+            }
+            if (post.comments && post.comments.length) walk(post.comments);
+        });
+
+        if (changed) {
+            localStorage.setItem('myidea_posts', JSON.stringify(posts));
+        }
+    } catch (err) {
+        console.error('Failed to normalize comments data', err);
+    }
+}
+
 function toggleTheme() {
+    const currentTheme = document.body.classList.contains('dark-theme') ? 'dark' : 'light';
     const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
+    
+    // Update body class
+    document.body.classList.toggle('dark-theme', newTheme === 'dark');
+    
+    // Update localStorage
+    localStorage.setItem('myidea_theme', newTheme);
+    
+    // Update icon
+    const themeIcon = document.querySelector('.theme-icon');
+    if (themeIcon) {
+        themeIcon.className = `fas ${newTheme === 'dark' ? 'fa-sun' : 'fa-moon'} theme-icon`;
+    }
+    
+    // Update UI colors
+    document.documentElement.setAttribute('data-theme', newTheme);
 }
 
 function updateThemeIcon() {
@@ -123,49 +242,191 @@ function validatePassword(password) {
 
 function showError(elementId, message) {
     const errorElement = document.getElementById(elementId);
-    errorElement.textContent = message;
-    errorElement.style.display = 'block';
+    const inputElement = document.getElementById(elementId.replace('Error', ''));
+    
+    if (errorElement) {
+        errorElement.textContent = message;
+        errorElement.style.display = 'block';
+        
+        if (inputElement) {
+            inputElement.classList.add('input-error');
+            inputElement.setAttribute('aria-invalid', 'true');
+            
+            // Add shake animation
+            inputElement.classList.add('shake');
+            setTimeout(() => {
+                inputElement.classList.remove('shake');
+            }, 500);
+        }
+
+        // Scroll error into view if not visible
+        const rect = errorElement.getBoundingClientRect();
+        const isVisible = rect.top >= 0 && rect.bottom <= window.innerHeight;
+        if (!isVisible) {
+            errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
 }
 
 function hideErrors() {
     const errors = document.querySelectorAll('.error-message');
-    errors.forEach(error => error.style.display = 'none');
+    errors.forEach(error => {
+        error.style.display = 'none';
+        const inputId = error.id.replace('Error', '');
+        const input = document.getElementById(inputId);
+        if (input) {
+            input.classList.remove('input-error');
+            input.removeAttribute('aria-invalid');
+        }
+    });
+}
+
+function showNotification(message, type = 'info') {
+    const container = document.createElement('div');
+    container.className = `notification notification-${type}`;
+    container.innerHTML = `
+        <div class="notification-content">
+            <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+            <span>${message}</span>
+        </div>
+        <button class="notification-close"><i class="fas fa-times"></i></button>
+    `;
+
+    document.body.appendChild(container);
+    
+    // Trigger entrance animation
+    requestAnimationFrame(() => {
+        container.classList.add('notification-show');
+    });
+
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        container.classList.remove('notification-show');
+        setTimeout(() => container.remove(), 300);
+    }, 5000);
+
+    // Close button handler
+    container.querySelector('.notification-close').addEventListener('click', () => {
+        container.classList.remove('notification-show');
+        setTimeout(() => container.remove(), 300);
+    });
 }
 
 function login(email, password) {
-    const user = users.find(u => u.email === email && u.password === password);
-    if (user) {
+    const loginBtn = document.querySelector('#loginForm button[type="submit"]');
+    if (loginBtn) {
+        loginBtn.disabled = true;
+        SecurityUtils.setButtonLoading(loginBtn, true);
+    }
+    
+    try {
+        // Get users from localStorage
+        const users = JSON.parse(localStorage.getItem('myidea_users') || '[]');
+        
+        // Rate limiting check
+        if (!SecurityUtils.rateLimit('login', 5, 300000)) { // 5 attempts per 5 minutes
+            showNotification('Too many login attempts. Please try again later.', 'error');
+            return false;
+        }
+
+        // Validate input
+        if (!SecurityUtils.validateInput(email, { required: true, email: true }) ||
+            !SecurityUtils.validateInput(password, { required: true, minLength: 8 })) {
+            showNotification('Invalid email or password format', 'error');
+            return false;
+        }
+
+        const user = users.find(u => u.email === email && u.password === password);
+        if (!user) {
+            showNotification('Invalid email or password', 'error');
+            return false;
+        }
+
+        // Initialize missing fields if needed
+        if (!user.id) user.id = Date.now().toString();
+        if (!user.avatar) {
+            user.avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`;
+        }
+        if (!user.joinedDate) user.joinedDate = new Date().toISOString();
+        if (!Array.isArray(user.posts)) user.posts = [];
+        if (!Array.isArray(user.followers)) user.followers = [];
+        if (!Array.isArray(user.following)) user.following = [];
+
+        // Set current user
         currentUser = user;
+        
+        // Save with remember me option
         const remember = document.getElementById('rememberSession')?.checked || false;
         setSecureSession(user, remember);
         localStorage.setItem('myidea_currentUser', JSON.stringify(user));
-        window.location.href = 'feed.html';
+        
+        // Save updated user data
+        const userIndex = users.findIndex(u => u.email === email);
+        if (userIndex !== -1) {
+            users[userIndex] = user;
+            localStorage.setItem('myidea_users', JSON.stringify(users));
+        }
+
+        // Show success message and redirect
+        showNotification('Login successful!', 'success');
+        setTimeout(() => window.location.href = 'feed.html', 1000);
         return true;
+    } catch (err) {
+        console.error('Login failed:', err);
+        return false;
     }
-    return false;
 }
 
 function register(name, email, password) {
-    if (users.some(u => u.email === email)) {
-        return false; // Email already exists
+    try {
+        // Validate input
+        if (!name || !email || !password) {
+            showNotification('All fields are required', 'error');
+            return false;
+        }
+
+        // Check if email exists
+        if (users.some(u => u.email === email)) {
+            showNotification('Email already registered', 'error');
+            return false;
+        }
+
+        // Create new user with all required fields
+        const newUser = {
+            id: Date.now().toString(),
+            name: name,
+            email: email,
+            password: password,
+            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
+            bio: '',
+            joinedDate: new Date().toISOString(),
+            posts: [],
+            followers: [],
+            following: [],
+            notifications: [],
+            settings: {
+                theme: 'light',
+                emailNotifications: true,
+                pushNotifications: true,
+                showOnline: true,
+                private: false
+            },
+            savedPosts: [],
+            pinnedPosts: []
+        };
+
+        // Save to users array and localStorage
+        users.push(newUser);
+        localStorage.setItem('myidea_users', JSON.stringify(users));
+
+        // Show success message
+        showNotification('Registration successful! Please log in.', 'success');
+        return true;
+    } catch (err) {
+        console.error('Registration failed:', err);
+        showNotification('Registration failed. Please try again.', 'error');
+        return false;
     }
-
-    const newUser = {
-        id: Date.now().toString(),
-        name: name,
-        email: email,
-        password: password,
-        avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
-        bio: '',
-        joinedDate: new Date().toISOString(),
-        posts: [],
-        followers: [],
-        following: []
-    };
-
-    users.push(newUser);
-    localStorage.setItem('myidea_users', JSON.stringify(users));
-    return true;
 }
 
 // AI Image Analysis Function with OCR and Deep Analysis
@@ -424,24 +685,46 @@ function loadUserData() {
     renderNotifications();
 }
 
-function createPost(text, imageData = null, aiAnalysis = null) {
-    const post = {
-        id: Date.now().toString(),
-        userId: currentUser.id,
-        userName: currentUser.name,
-        userAvatar: currentUser.avatar,
-        text: text,
-        image: imageData,
-        aiAnalysis: aiAnalysis,
-        timestamp: new Date().toISOString(),
-        likes: [],
-        comments: [],
-        tags: extractTags(text),
-        shares: 0,
-        pinned: false,
-        pinnedBy: null,
-        pinnedAt: null
-    };
+async async function createPost(text, imageData = null, aiAnalysis = null) {
+    const postBtn = document.getElementById('postBtn');
+    if (postBtn) {
+        postBtn.disabled = true;
+        postBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Posting...';
+    }
+
+    try {
+        const auth = window.authService;
+        const currentUser = auth.getCurrentUser();
+        
+        if (!currentUser) {
+            showNotification('Please log in to create a post', 'error');
+            return null;
+        }
+
+        // Validate input
+        if (!text && !imageData) {
+            showNotification('Post cannot be empty', 'error');
+            return null;
+        }
+
+        const post = {
+            id: Date.now().toString(),
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userAvatar: currentUser.avatar,
+            text: text,
+            image: imageData,
+            aiAnalysis: aiAnalysis,
+            timestamp: new Date().toISOString(),
+            likes: [],
+            comments: [],
+            tags: extractTags(text),
+            shares: 0,
+            pinned: false,
+            pinnedBy: null,
+            pinnedAt: null,
+            saved: []
+        };
 
     posts.unshift(post);
     currentUser.posts.unshift(post.id);
@@ -474,14 +757,26 @@ function renderPosts() {
 }
 
 function createPostElement(post) {
+    // Validate input
+    if (!post || !post.id || !post.userId || !post.userName) {
+        console.error('Invalid post data:', post);
+        return document.createElement('div'); // Return empty div
+    }
+
     const postDiv = document.createElement('div');
     postDiv.className = 'post-card';
-    postDiv.setAttribute('data-post-id', post.id);
+    postDiv.setAttribute('data-post-id', SecurityUtils.sanitizeInput(post.id));
+
+    // Validate user session before rendering interactive elements
+    const isAuthenticated = SecurityUtils.validateSession();
+    const currentUser = SecurityUtils.getSecureSession()?.user;
+    const isOwner = currentUser && post.userId === currentUser.id;
+
     postDiv.innerHTML = `
         <div class="post-header">
-            <img src="${post.userAvatar}" alt="${post.userName}" class="post-user-avatar">
+            <img src="${post.userAvatar}" alt="${post.userName}" class="post-user-avatar" onclick="viewProfile('${post.userId}')">
             <div class="post-user-info">
-                <h4>${post.userName}</h4>
+                <h4 onclick="viewProfile('${post.userId}')" style="cursor:pointer">${post.userName}</h4>
                 <p>${formatTimestamp(post.timestamp)}</p>
                 ${post.pinned ? `<span class="pin-badge">Pinned</span>` : ''}
             </div>
@@ -537,26 +832,164 @@ function formatTimestamp(timestamp) {
 }
 
 function toggleLike(postId) {
+    const auth = window.authService;
+    const currentUser = auth.getCurrentUser();
+    
+    if (!currentUser) {
+        showNotification('Please log in to like posts', 'error');
+        return;
+    }
+
+    // Get posts from storage
+    const posts = JSON.parse(localStorage.getItem('myidea_posts') || '[]');
+    const post = posts.find(p => p.id === postId);
+    
+    if (!post) {
+        showNotification('Post not found', 'error');
+        return;
+    }
+
+    // Initialize likes array if not exists
+    if (!Array.isArray(post.likes)) {
+        post.likes = [];
+    }
+
+    // Check if user already liked the post
+    const userIndex = post.likes.indexOf(currentUser.id);
+    if (userIndex === -1) {
+        post.likes.push(currentUser.id);
+    } else {
+        post.likes.splice(userIndex, 1);
+    }
+
+    // Save changes
+    localStorage.setItem('myidea_posts', JSON.stringify(posts));
+    
+    // Update UI
+        const auth = window.authService;
+        const currentUser = auth.getCurrentUser();
+    
+        if (!currentUser) {
+    if (likeBtn) {
+        const likeCount = likeBtn.querySelector('span');
+        if (likeCount) likeCount.textContent = post.likes.length;
+        likeBtn.classList.toggle('active', post.likes.includes(currentUser.id));
+    }
+
+    // Ensure comments array and shape
+    post.comments = post.comments || [];
+
+
+        // Get posts from storage
+        const posts = JSON.parse(localStorage.getItem('myidea_posts') || '[]');
+    const comment = createComment(text);
+        // Find post to comment on
+        const post = posts.find(p => p.id === postId);
+    input.value = '';
+
+    // Refresh modal to show threaded comments
+    openPostModal(postId);
+
+    // Notify post owner if someone else commented on their post
+    if (post.userId !== currentUser.id) {
+        addNotificationForUser(post.userId, {
+            id: Date.now().toString(),
+            type: 'comment',
+            text: `${currentUser.name} commented: ${comment.text.substring(0, 80)}`,
+            postId: post.id,
+            fromUserId: currentUser.id,
+            timestamp: new Date().toISOString(),
+            read: false
+        });
+    }
+    const post = posts.find(p => p.id === postId);
+
+        // Initialize comments array if it doesn't exist
+        if (!post.comments) {
+            post.comments = [];
+        }
+
+        // Create new comment
+        const comment = {
+            id: Date.now().toString(),
+            postId: postId,
+            userId: currentUser.id,
+            username: currentUser.username,
+            text: commentText,
+            timestamp: new Date().toISOString(),
+        };
+
+        // Add comment to post
+        post.comments.push(comment);
+
+        // Update storage
+        localStorage.setItem('myidea_posts', JSON.stringify(posts));
+
+        // Clear input
+        commentInput.value = '';
+
+        // Update UI
+        renderComments(postId);
+        showNotification('Comment added successfully', 'success');
+// Comment model helper to ensure consistent shape and replies array
+function createComment(text) {
+    return {
+        id: Date.now().toString(),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        text: text,
+        timestamp: new Date().toISOString(),
+        replies: [] // nested replies (tree structure)
+    };
+}
+
+// Add a reply under a specific comment (nested threaded reply)
+function addReply(postId, commentId, text) {
+    if (!text) return;
     const post = posts.find(p => p.id === postId);
     if (!post) return;
 
-    const likeIndex = post.likes.indexOf(currentUser.id);
-    const wasLiked = likeIndex > -1;
-    if (wasLiked) {
-        post.likes.splice(likeIndex, 1);
-    } else {
-        post.likes.push(currentUser.id);
-    }
+    // Normalize comments/replies
+    post.comments = post.comments || [];
+
+    // Find target comment (depth-first search)
+    const target = findCommentById(post.comments, commentId);
+    if (!target) return;
+
+    const reply = {
+        id: Date.now().toString(),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        text: text,
+        timestamp: new Date().toISOString(),
+        replies: []
+    };
+
+    target.replies = target.replies || [];
+    target.replies.push(reply);
 
     localStorage.setItem('myidea_posts', JSON.stringify(posts));
-    renderPosts();
 
-    // Notify post owner if someone else liked their post
-    if (!wasLiked && post.userId !== currentUser.id) {
+    // Refresh modal to show updated tree
+    openPostModal(postId);
+
+    // Notify original commenter and post owner (if different)
+    if (target.userId !== currentUser.id) {
+        addNotificationForUser(target.userId, {
+            id: Date.now().toString(),
+            type: 'reply',
+            text: `${currentUser.name} replied: ${reply.text.substring(0,80)}`,
+            postId: post.id,
+            fromUserId: currentUser.id,
+            timestamp: new Date().toISOString(),
+            read: false
+        });
+    }
+    if (post.userId !== currentUser.id && post.userId !== target.userId) {
         addNotificationForUser(post.userId, {
             id: Date.now().toString(),
-            type: 'like',
-            text: `${currentUser.name} liked your post`,
+            type: 'reply',
+            text: `${currentUser.name} replied in a thread on your post`,
             postId: post.id,
             fromUserId: currentUser.id,
             timestamp: new Date().toISOString(),
@@ -565,6 +998,143 @@ function toggleLike(postId) {
     }
 }
 
+// Depth-first search to find a comment by id in a tree of comments
+function findCommentById(commentsArray, id) {
+    for (let i = 0; i < commentsArray.length; i++) {
+        const c = commentsArray[i];
+        if (c.id === id) return c;
+        if (c.replies && c.replies.length) {
+            const found = findCommentById(c.replies, id);
+            if (found) return found;
+        }
+    }
+    return null;
+}
+
+// Toggle a reply box directly under a comment in the modal
+function toggleReplyBox(postId, commentId) {
+    const container = document.getElementById('commentsList');
+    if (!container) return;
+
+    // If a reply box already exists for this comment, remove it
+    const existing = container.querySelector(`.reply-box[data-for='${commentId}']`);
+    if (existing) { existing.remove(); return; }
+
+    // Find the comment element
+    const commentEl = container.querySelector(`.comment[data-comment-id='${commentId}']`);
+    if (!commentEl) return;
+
+    const box = document.createElement('div');
+    box.className = 'reply-box';
+    box.dataset.for = commentId;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Write a reply... (Enter to post)';
+    input.maxLength = 300;
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            const val = input.value.trim();
+            if (val) addReply(postId, commentId, val);
+        }
+    });
+
+    const send = document.createElement('button');
+    send.textContent = 'Reply';
+    send.addEventListener('click', function() {
+        const val = input.value.trim();
+        if (val) addReply(postId, commentId, val);
+    });
+
+    box.appendChild(input);
+    box.appendChild(send);
+
+    commentEl.appendChild(box);
+    input.focus();
+}
+
+// Render threaded comments as an indented tree with simple time-graph markers
+function renderThreadedComments(post, containerEl) {
+    containerEl.innerHTML = '';
+    if (!post.comments || post.comments.length === 0) {
+        containerEl.innerHTML = '<p style="color:var(--text-muted);">No comments yet</p>';
+        return;
+    }
+
+    // Sort top-level comments chronologically (oldest first for thread view)
+    const sorted = post.comments.slice().sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    const timeline = document.createElement('div');
+    timeline.className = 'comments-timeline';
+    containerEl.appendChild(timeline);
+
+    sorted.forEach(comment => {
+        const node = renderCommentNode(comment, post.id, 0);
+        timeline.appendChild(node);
+    });
+}
+
+function renderCommentNode(comment, postId, depth) {
+    // Container for a single comment (and its replies)
+    const wrapper = document.createElement('div');
+    wrapper.className = 'comment';
+    wrapper.dataset.commentId = comment.id;
+    wrapper.style.marginLeft = `${depth * 18}px`;
+    wrapper.dataset.depth = depth;
+    // mark whether this node is a top-level comment or a reply (for marker color)
+    wrapper.dataset.event = depth && depth > 0 ? 'reply' : 'comment';
+    // ensure space for timeline marker
+    wrapper.style.position = 'relative';
+    wrapper.style.paddingLeft = '18px';
+
+    // Add a timeline marker (dot + vertical line) to visualize time-graph
+    const marker = document.createElement('div');
+    marker.className = 'timeline-marker';
+    marker.innerHTML = `<span class="timeline-dot"></span><span class="timeline-line"></span>`;
+    wrapper.appendChild(marker);
+
+    const head = document.createElement('div');
+    head.className = 'comment-head';
+    head.innerHTML = `<strong>${escapeHtml(comment.userName)}</strong> <span class="comment-time">${formatTimestamp(comment.timestamp)}</span>`;
+
+    const body = document.createElement('div');
+    body.className = 'comment-body';
+    body.textContent = comment.text;
+
+    const actions = document.createElement('div');
+    actions.className = 'comment-actions';
+    const replyBtn = document.createElement('button');
+    replyBtn.className = 'link-btn';
+    replyBtn.textContent = 'Reply';
+    replyBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        toggleReplyBox(postId, comment.id);
+    });
+    actions.appendChild(replyBtn);
+
+    wrapper.appendChild(head);
+    wrapper.appendChild(body);
+    wrapper.appendChild(actions);
+
+    // If replies exist, render them recursively (sorted by time)
+    if (comment.replies && comment.replies.length) {
+        const repliesContainer = document.createElement('div');
+        repliesContainer.className = 'replies-container';
+        const sortedReplies = comment.replies.slice().sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+        sortedReplies.forEach(r => {
+            repliesContainer.appendChild(renderCommentNode(r, postId, depth + 1));
+        });
+        wrapper.appendChild(repliesContainer);
+    }
+
+    return wrapper;
+}
+
+// Simple HTML escaper to avoid injection when rendering usernames
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>\"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]; });
+}
 function openPostModal(postId) {
     const post = posts.find(p => p.id === postId);
     if (!post) return;
@@ -593,40 +1163,61 @@ function openPostModal(postId) {
                         <div class="ai-tags">${post.aiAnalysis.tags.map(tag => `<span class="ai-tag">#${tag}</span>`).join('')}</div>
                     </div>
                 ` : ''}
-                ${post.tags.length > 0 ? `<div class="post-tags">${post.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>` : ''}
+                ${post.tags && post.tags.length > 0 ? `<div class="post-tags">${post.tags.map(tag => `<span class="tag">#${tag}</span>`).join('')}</div>` : ''}
             </div>
             <div class="post-actions">
-                <button class="action-btn" onclick="toggleLike('${post.id}')">
-                    <i class="fas fa-heart"></i> ${post.likes.length}
-                </button>
-                <button class="action-btn">
-                    <i class="fas fa-comment"></i> ${post.comments.length}
-                </button>
-                <button class="action-btn" onclick="sharePost('${post.id}')">
-                    <i class="fas fa-share"></i> ${post.shares || 0}
-                </button>
-                <button class="action-btn" onclick="togglePin('${post.id}')" title="Pin/Unpin post">
-                    <i class="fas fa-thumbtack"></i>
-                </button>
+                ${isAuthenticated ? `
+                    <button class="action-btn" onclick="if(SecurityUtils.validateSession() && SecurityUtils.rateLimit('like_${post.id}', 5, 5000)) toggleLike('${SecurityUtils.sanitizeInput(post.id)}')" data-likes="${post.likes.length}">
+                        <i class="fas fa-heart ${post.likes.includes(currentUser?.id) ? 'active' : ''}"></i> 
+                        <span>${post.likes.length}</span>
+                    </button>
+                    <button class="action-btn" onclick="if(SecurityUtils.validateSession()) toggleCommentBox('${SecurityUtils.sanitizeInput(post.id)}')">
+                        <i class="fas fa-comment"></i> 
+                        <span>${post.comments ? post.comments.length : 0}</span>
+                    </button>
+                    <button class="action-btn" onclick="if(SecurityUtils.validateSession() && SecurityUtils.rateLimit('share_${post.id}', 3, 10000)) sharePost('${SecurityUtils.sanitizeInput(post.id)}')">
+                        <i class="fas fa-share"></i> 
+                        <span>${post.shares || 0}</span>
+                    </button>
+                    ${isOwner ? `
+                        <button class="action-btn" onclick="if(SecurityUtils.validateSession()) togglePin('${SecurityUtils.sanitizeInput(post.id)}')" title="Pin/Unpin post">
+                            <i class="fas fa-thumbtack ${post.pinned ? 'active' : ''}"></i>
+                        </button>
+                    ` : ''}
+                ` : `
+                    <button class="action-btn" onclick="window.location.href='login.html'">
+                        <i class="fas fa-heart"></i> ${post.likes.length}
+                    </button>
+                    <button class="action-btn" onclick="window.location.href='login.html'">
+                        <i class="fas fa-comment"></i> ${post.comments ? post.comments.length : 0}
+                    </button>
+                `}
             </div>
         </div>
         <div class="comments-section">
             <h4>Comments</h4>
-            <div id="commentsList">
-                ${post.comments.map(comment => `
-                    <div class="comment">
-                        <strong>${comment.userName}:</strong> ${comment.text}
-                    </div>
-                `).join('')}
-            </div>
+            <div id="commentsList"></div>
             <div class="add-comment">
                 <input type="text" id="commentInput" placeholder="Add a comment..." maxlength="200">
-                <button onclick="addComment('${post.id}')">Post</button>
+                <button id="postCommentBtn">Post</button>
             </div>
         </div>
     `;
 
     modal.style.display = 'block';
+
+    // Wire the comment post button and render threaded comments
+    const commentsListEl = document.getElementById('commentsList');
+    renderThreadedComments(post, commentsListEl);
+
+    const postBtn = document.getElementById('postCommentBtn');
+    if (postBtn) {
+        postBtn.addEventListener('click', function() {
+            const input = document.getElementById('commentInput');
+            const text = input.value.trim();
+            if (text) addComment(post.id);
+        });
+    }
 }
 
 function closeModal() {
@@ -634,25 +1225,55 @@ function closeModal() {
 }
 
 function addComment(postId) {
+    const auth = window.authService;
+    const currentUser = auth.getCurrentUser();
+    
+    if (!currentUser) {
+        showNotification('Please log in to comment', 'error');
+        return;
+    }
+
+    // Rate limiting
+    if (!SecurityUtils.rateLimit(`comment_${postId}`, 3, 60000)) {
+        showNotification('Please wait before adding more comments', 'error');
+        return;
+    }
+
+    // Get posts from storage
+    const posts = JSON.parse(localStorage.getItem('myidea_posts') || '[]');
+
     const input = document.getElementById('commentInput');
     const text = input.value.trim();
-    if (!text) return;
+
+    // Validate input
+    if (!SecurityUtils.validateInput(text, {
+        required: true,
+        minLength: 1,
+        maxLength: 1000,
+        noScript: true,
+        sanitize: true,
+        noProfanity: true
+    })) {
+        showNotification('Invalid comment text', 'error');
+        return;
+    }
 
     const post = posts.find(p => p.id === postId);
-    if (!post) return;
+    if (!post) {
+        showNotification('Post not found', 'error');
+        return;
+    }
 
-    const comment = {
-        id: Date.now().toString(),
-        userId: currentUser.id,
-        userName: currentUser.name,
-        text: text,
-        timestamp: new Date().toISOString()
-    };
+    // Normalize
+    post.comments = post.comments || [];
 
+    const comment = createComment(text);
     post.comments.push(comment);
     localStorage.setItem('myidea_posts', JSON.stringify(posts));
     input.value = '';
-    openPostModal(postId); // Refresh modal
+
+    // Refresh modal to show threaded comments
+    openPostModal(postId);
 
     // Notify post owner if someone else commented on their post
     if (post.userId !== currentUser.id) {
@@ -717,8 +1338,38 @@ function sharePost(postId) {
 
 // Multi-Image Upload with AI Analysis
 async function handleImageUpload(event) {
+    // Validate session and rate limiting
+    if (!SecurityUtils.validateSession()) {
+        showNotification('Please log in to upload images', 'error');
+        return;
+    }
+    if (!SecurityUtils.rateLimit('image_upload', 5, 60000)) {
+        showNotification('Too many upload attempts. Please try again later.', 'error');
+        return;
+    }
+
     const files = Array.from(event.target.files);
     if (files.length === 0) return;
+
+    // Validate each file
+    const validFiles = files.filter(file => {
+        // Check file type
+        if (!file.type.match(/^image\/(jpeg|png|gif|webp)$/)) {
+            showNotification(`Invalid file type: ${file.name}. Only JPEG, PNG, GIF and WEBP allowed.`, 'error');
+            return false;
+        }
+        // Check file size (5MB limit)
+        if (file.size > 5 * 1024 * 1024) {
+            showNotification(`File too large: ${file.name}. Maximum size is 5MB.`, 'error');
+            return false;
+        }
+        return true;
+    });
+
+    if (validFiles.length === 0) {
+        showNotification('No valid files to upload', 'error');
+        return;
+    }
 
     selectedImages = [];
     const preview = document.getElementById('imagePreview');
@@ -1198,9 +1849,13 @@ function initProfilePage() {
                 const file = e.target.files[0];
                 if (!file) return;
 
-                // Validate types and sizes
+                // Reset any previous pending avatar
+                pendingAvatarDataURL = null;
+                avatarPreview.style.display = 'none';
+                avatarPreview.innerHTML = '';
+
+                // Handle short videos (<= 3s)
                 if (file.type.startsWith('video/')) {
-                    // Load metadata to check duration
                     const url = URL.createObjectURL(file);
                     const v = document.createElement('video');
                     v.preload = 'metadata';
@@ -1211,29 +1866,39 @@ function initProfilePage() {
                         if (duration > 3.1) {
                             alert('Please select a video shorter than or equal to 3 seconds.');
                             editAvatarInput.value = '';
-                            avatarPreview.style.display = 'none';
-                            pendingAvatarDataURL = null;
                             return;
                         }
 
+                        // Read file as data URL for persistence/preview
                         const reader = new FileReader();
                         reader.onload = function(ev) {
                             pendingAvatarDataURL = ev.target.result;
                             avatarPreview.style.display = 'block';
-                            avatarPreview.innerHTML = `<video class="preview-avatar" autoplay loop muted playsinline src="${pendingAvatarDataURL}"></video>`;
+                            avatarPreview.innerHTML = `<video class="preview-avatar-video" src="${pendingAvatarDataURL}" autoplay loop muted playsinline></video>`;
+                        };
+                        reader.onerror = function() {
+                            alert('Could not read video file.');
+                            editAvatarInput.value = '';
                         };
                         reader.readAsDataURL(file);
                     };
                     v.onerror = function() {
-                        alert('Could not read video file.');
+                        URL.revokeObjectURL(url);
+                        alert('Could not load video metadata.');
                         editAvatarInput.value = '';
                     };
+
+                // Handle images/GIFs
                 } else if (file.type.startsWith('image/')) {
                     const reader = new FileReader();
                     reader.onload = function(ev) {
                         pendingAvatarDataURL = ev.target.result;
                         avatarPreview.style.display = 'block';
                         avatarPreview.innerHTML = `<img class="preview-avatar" src="${pendingAvatarDataURL}" alt="Avatar preview">`;
+                    };
+                    reader.onerror = function() {
+                        alert('Could not read image file.');
+                        editAvatarInput.value = '';
                     };
                     reader.readAsDataURL(file);
                 } else {
@@ -1278,38 +1943,82 @@ function updatePostButton() {
 
 // Profile Management Functions
 function loadProfile() {
-    const currentUser = getCurrentUser();
-    if (!currentUser) {
-        window.location.href = 'login.html';
-        return;
+    // Allow viewing another user's profile via ?userId={id}
+    const params = new URLSearchParams(window.location.search);
+    const viewUserId = params.get('userId');
+
+    const sessionUser = getCurrentUser();
+    let profileUser = null;
+
+    if (viewUserId) {
+        // try to find the requested user
+        profileUser = users.find(u => u.id === viewUserId);
+        if (!profileUser) {
+            // if not found, show message and fallback to current user if available
+            if (!sessionUser) {
+                document.getElementById('profileAvatarContainer').innerHTML = '<p style="color:var(--text-muted)">User not found</p>';
+                return;
+            }
+            profileUser = sessionUser;
+        }
+    } else {
+        if (!sessionUser) {
+            window.location.href = 'login.html';
+            return;
+        }
+        profileUser = sessionUser;
     }
 
-    // Load user profile data
     const profileAvatarContainer = document.getElementById('profileAvatarContainer');
     const profileName = document.getElementById('profileName');
     const profileBio = document.getElementById('profileBio');
 
     // Render avatar: could be image/gif or video data URL
-    if (currentUser.avatar && currentUser.avatar.startsWith('data:video')) {
-        // Render video element
-        profileAvatarContainer.innerHTML = `<video id="profileAvatarVideo" class="profile-avatar" autoplay loop muted playsinline src="${currentUser.avatar}"></video>`;
+    if (profileUser.avatar && profileUser.avatar.startsWith('data:video')) {
+        profileAvatarContainer.innerHTML = `<video id="profileAvatarVideo" class="profile-avatar" autoplay loop muted playsinline src="${profileUser.avatar}"></video>`;
     } else {
-        const imgSrc = currentUser.avatar || 'https://via.placeholder.com/120x120?text=User';
-        profileAvatarContainer.innerHTML = `<img id="profileAvatar" src="${imgSrc}" alt="Profile Avatar" class="profile-avatar">`;
+        const imgSrc = profileUser.avatar || 'https://via.placeholder.com/120x120?text=User';
+        profileAvatarContainer.innerHTML = `<img id="profileAvatar" src="${imgSrc}" alt="Profile Avatar" class="profile-avatar" onclick="viewProfile('${profileUser.id}')">`;
     }
 
-    profileName.textContent = currentUser.name;
-    profileBio.textContent = currentUser.bio || 'No bio yet';
+    profileName.textContent = profileUser.name;
+    profileBio.textContent = profileUser.bio || 'No bio yet';
 
-    // Load user posts
-    loadUserPosts();
-    updateProfileStats();
+    // Load user posts (show posts for profileUser)
+    loadUserPosts(profileUser.id);
+    updateProfileStats(profileUser.id);
+
+    // Show/hide edit buttons depending on whether the logged-in session user is viewing their own profile
+    const isOwn = sessionUser && sessionUser.id === profileUser.id;
+    const editBtn = document.getElementById('editProfileBtn');
+    const settingsBtn = document.getElementById('settingsBtn');
+    if (editBtn) editBtn.style.display = isOwn ? 'inline-flex' : 'none';
+    if (settingsBtn) settingsBtn.style.display = isOwn ? 'inline-flex' : 'none';
+    // If viewing someone else, show follow/unfollow controls
+    const followContainer = document.getElementById('profileFollowContainer');
+    if (followContainer) {
+        followContainer.innerHTML = '';
+        if (!isOwn && sessionUser) {
+            const isFollowing = sessionUser.following && sessionUser.following.includes(profileUser.id);
+            const btn = document.createElement('button');
+            btn.className = 'btn-primary';
+            btn.textContent = isFollowing ? 'Unfollow' : 'Follow';
+            btn.addEventListener('click', function() {
+                if (isFollowing) { unfollowUser(profileUser.id); btn.textContent = 'Follow'; }
+                else { followUser(profileUser.id); btn.textContent = 'Unfollow'; }
+            });
+            followContainer.appendChild(btn);
+        }
+    }
 }
 
 function loadUserPosts() {
     const currentUser = getCurrentUser();
     const posts = getPosts();
-    const userPosts = posts.filter(post => post.userId === currentUser.id);
+    // optional userId to view someone else's posts
+    const userId = arguments.length > 0 && arguments[0] ? arguments[0] : (currentUser ? currentUser.id : null);
+    if (!userId) return;
+    const userPosts = posts.filter(post => post.userId === userId);
 
     const userPostsContainer = document.getElementById('userPosts');
     userPostsContainer.innerHTML = '';
@@ -1335,14 +2044,20 @@ function loadUserPosts() {
     observePosts();
 }
 
-function updateProfileStats() {
-    const currentUser = getCurrentUser();
+function updateProfileStats(userId) {
+    const sessionUser = getCurrentUser();
+    const targetId = userId || (sessionUser ? sessionUser.id : null);
+    if (!targetId) return;
     const posts = getPosts();
-    const userPosts = posts.filter(post => post.userId === currentUser.id);
+    const userPosts = posts.filter(post => post.userId === targetId);
 
-    document.getElementById('profilePosts').textContent = userPosts.length;
-    document.getElementById('profileFollowers').textContent = currentUser.followers || 0;
-    document.getElementById('profileFollowing').textContent = currentUser.following || 0;
+    const targetUser = users.find(u => u.id === targetId) || sessionUser || {};
+    const postsEl = document.getElementById('profilePosts');
+    const followersEl = document.getElementById('profileFollowers');
+    const followingEl = document.getElementById('profileFollowing');
+    if (postsEl) postsEl.textContent = userPosts.length;
+    if (followersEl) followersEl.textContent = (targetUser.followers && targetUser.followers.length) || 0;
+    if (followingEl) followingEl.textContent = (targetUser.following && targetUser.following.length) || 0;
 }
 
 function openEditProfileModal() {
@@ -1476,12 +2191,20 @@ function createPostCard(post) {
     postDiv.setAttribute('data-post-id', post.id);
     postDiv.innerHTML = `
         <div class="post-header">
-            <img src="${post.userAvatar}" alt="${post.userName}" class="post-user-avatar">
+            <img src="${post.userAvatar}" alt="${post.userName}" class="post-user-avatar" onclick="viewProfile('${post.userId}')">
             <div class="post-user-info">
-                <h4>${post.userName}</h4>
+                <h4 onclick="viewProfile('${post.userId}')" style="cursor:pointer">${post.userName}</h4>
                 <p>${formatTimestamp(post.timestamp)}</p>
                 ${post.pinned ? `<span class="pin-badge">Pinned</span>` : ''}
             </div>
+            ${currentUser && currentUser.id !== post.userId ? `
+                <div class="post-header-actions">
+                    ${currentUser.following && currentUser.following.includes(post.userId) ?
+                        `<button class="icon-btn small" onclick="toggleFollow('${post.userId}')">Unfollow</button>` :
+                        `<button class="icon-btn small" onclick="toggleFollow('${post.userId}')">Follow</button>`
+                    }
+                </div>
+            ` : ''}
         </div>
         <div class="post-content">
             ${post.image ? `<img src="${post.image}" alt="Post image" class="post-image" onclick="openPostModal('${post.id}')">` : ''}
@@ -1607,14 +2330,9 @@ function addInlineComment(postId, text) {
     const post = posts.find(p => p.id === postId);
     if (!post) return;
 
-    const comment = {
-        id: Date.now().toString(),
-        userId: currentUser.id,
-        userName: currentUser.name,
-        text: text,
-        timestamp: new Date().toISOString()
-    };
-
+    // Use createComment to ensure replies array and consistent shape
+    const comment = createComment(text);
+    post.comments = post.comments || [];
     post.comments.push(comment);
     localStorage.setItem('myidea_posts', JSON.stringify(posts));
 
@@ -1870,6 +2588,23 @@ function markAllNotificationsRead() {
 }
 
 function renderNotifications() {
+    // Validate session
+    if (!SecurityUtils.validateSession()) {
+        const notifCountEl = document.getElementById('notifCount');
+        const notifListEl = document.getElementById('notifList');
+        const notifDropdown = document.getElementById('notifDropdown');
+        
+        if (notifCountEl) notifCountEl.style.display = 'none';
+        if (notifListEl) notifListEl.innerHTML = '<li style="padding:10px; color:var(--text-muted)">Sign in to see notifications</li>';
+        if (notifDropdown) notifDropdown.style.display = 'none';
+        return;
+    }
+
+    // Rate limiting for notifications refresh
+    if (!SecurityUtils.rateLimit('notifications_refresh', 10, 60000)) {
+        return; // Silently fail to avoid spamming
+    }
+
     const notifCountEl = document.getElementById('notifCount');
     const notifListEl = document.getElementById('notifList');
     if (!currentUser) {
@@ -1950,3 +2685,12 @@ window.unfollowUser = unfollowUser;
 window.switchTab = switchTab;
 window.toggleCommentBox = toggleCommentBox;
 window.addInlineComment = addInlineComment;
+window.addReply = addReply;
+window.toggleReplyBox = toggleReplyBox;
+window.renderThreadedComments = renderThreadedComments;
+// View a user's profile by navigating to profile.html?userId={id}
+function viewProfile(userId) {
+    if (!userId) return;
+    window.location.href = `profile.html?userId=${encodeURIComponent(userId)}`;
+}
+window.viewProfile = viewProfile;

@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MyIdea - Profile</title>
+    <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="styles_feed.css">
+    <link rel="stylesheet" href="animations.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
@@ -18,6 +20,10 @@
                 <a href="feed.html" class="nav-link">
                     <i class="fas fa-home"></i> Feed
                 </a>
+                <div class="nav-search">
+                    <input id="searchInput" type="search" placeholder="Search users..." aria-label="Search users">
+                    <button id="searchBtn" class="btn-search"><i class="fas fa-search"></i></button>
+                </div>
                 <a href="profile.html" class="nav-link active">
                     <i class="fas fa-user"></i> Profile
                 </a>
@@ -65,6 +71,7 @@
                         <button id="editProfileBtn" class="btn-primary">
                             <i class="fas fa-edit"></i> Edit Profile
                         </button>
+                        <div id="profileFollowContainer" style="display:inline-block; margin-left:8px"></div>
                         <button id="settingsBtn" class="btn-secondary">
                             <i class="fas fa-cog"></i> Settings
                         </button>
@@ -172,6 +179,211 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <!-- Page Transition -->
+    <div class="page-transition" style="display: none;"></div>
+
+    <!-- Notification Container -->
+    <div class="notification-container" id="notificationContainer"></div>
+
+    <!-- Loading Spinner -->
+    <div class="loading-spinner" id="pageLoading" style="display: none;">
+        <div class="spinner"></div>
+        <p>Loading profile...</p>
+    </div>
+
+    <!-- Load utilities first -->
+    <script src="js/security.js"></script>
+    <script src="js/validation.js"></script>
+    
+    <!-- Load services -->
+    <script src="js/auth.js"></script>
+    <script src="js/posts.js"></script>
+    
+    <!-- Load UI helpers -->
+    <script src="js/ui.js"></script>
+    <!-- Load feed controller so we can reuse post rendering and handlers -->
+    <script src="js/feed.js"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Validate session
+            if (!SecurityUtils.validateSession()) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            // Implement CSP
+            const meta = document.createElement('meta');
+            meta.httpEquiv = "Content-Security-Policy";
+            meta.content = SecurityUtils.getCSPHeaders()['Content-Security-Policy'];
+            document.head.appendChild(meta);
+
+            // Setup form validation
+            ValidationUtils.setupLiveValidation('editProfileForm', {
+                editName: { required: true, minLength: 2, maxLength: 50 },
+                editBio: { maxLength: 500 },
+                editAvatar: { 
+                    required: false,
+                    fileType: ['image/*', 'video/*'],
+                    maxSize: 5 * 1024 * 1024 // 5MB
+                }
+            });
+
+            // Initialize services
+            const auth = window.authService;
+            const posts = window.postService;
+            const ui = window.uiService;
+
+            // Determine whose profile to show (self or ?userId=...)
+            const params = new URLSearchParams(window.location.search);
+            const viewUserId = params.get('userId');
+            const currentUser = auth.getCurrentUser();
+
+            let profileUser = null;
+            if (viewUserId && viewUserId !== currentUser?.id) {
+                // find the requested user
+                profileUser = auth.users.find(u => u.id === viewUserId);
+            }
+            if (!profileUser) profileUser = currentUser;
+
+            if (!profileUser) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            // Load profile UI
+            document.getElementById('profileName').textContent = profileUser.name;
+            document.getElementById('profileBio').textContent = profileUser.bio || 'No bio yet';
+            const avatarEl = document.getElementById('profileAvatar');
+            if (avatarEl) avatarEl.src = profileUser.avatar || '';
+
+            // Load stats
+            const userPosts = posts.getUserPosts(profileUser.id);
+            document.getElementById('profilePosts').textContent = userPosts.length;
+            document.getElementById('profileFollowers').textContent = profileUser.followers?.length || 0;
+            document.getElementById('profileFollowing').textContent = profileUser.following?.length || 0;
+
+            // Show/hide edit & settings based on ownership
+            const isOwn = currentUser && currentUser.id === profileUser.id;
+            document.getElementById('editProfileBtn').style.display = isOwn ? 'inline-flex' : 'none';
+            document.getElementById('settingsBtn').style.display = isOwn ? 'inline-flex' : 'none';
+
+            // Follow/unfollow button for other users
+            const followContainer = document.getElementById('profileFollowContainer');
+            if (!isOwn && followContainer) {
+                followContainer.innerHTML = '';
+                const btn = document.createElement('button');
+                btn.className = 'btn-primary';
+                const isFollowing = auth.isFollowing(profileUser.id);
+                btn.textContent = isFollowing ? 'Unfollow' : 'Follow';
+                btn.addEventListener('click', () => {
+                    if (auth.isFollowing(profileUser.id)) {
+                        auth.unfollow(profileUser.id);
+                        btn.textContent = 'Follow';
+                        ui.showNotification(`Unfollowed ${profileUser.name}`, 'info');
+                    } else {
+                        auth.follow(profileUser.id);
+                        btn.textContent = 'Unfollow';
+                        ui.showNotification(`Now following ${profileUser.name}`, 'success');
+                    }
+                    // Update follower counts
+                    document.getElementById('profileFollowers').textContent = profileUser.followers?.length || 0;
+                    document.getElementById('profileFollowing').textContent = profileUser.following?.length || 0;
+                });
+                followContainer.appendChild(btn);
+            }
+
+            // Load user posts into Posts tab
+            const postsContainer = document.getElementById('userPosts');
+            if (postsContainer) postsContainer.innerHTML = userPosts.map(post => window.feed.createPostElement(post)).join('');
+
+            // Populate Liked tab (posts the profileUser liked)
+            const likedContainer = document.getElementById('likedPosts');
+            if (likedContainer) {
+                const allPosts = posts.getPosts();
+                const liked = allPosts.filter(p => Array.isArray(p.likes) && p.likes.includes(profileUser.id));
+                likedContainer.innerHTML = liked.length ? liked.map(p => window.feed.createPostElement(p)).join('') : '<div style="color:var(--text-muted); padding:10px">No liked posts</div>';
+            }
+
+            // Saved tab (if user has saved posts)
+            const savedContainer = document.getElementById('savedPosts');
+            if (savedContainer) {
+                const savedIds = profileUser.savedPosts || [];
+                const all = posts.getPosts();
+                const saved = all.filter(p => savedIds.includes(p.id));
+                savedContainer.innerHTML = saved.length ? saved.map(p => window.feed.createPostElement(p)).join('') : '<div style="color:var(--text-muted); padding:10px">No saved posts</div>';
+            }
+
+            // Wire edit and settings buttons
+            document.getElementById('editProfileBtn')?.addEventListener('click', () => { ui.openEditProfileModal(); });
+            document.getElementById('settingsBtn')?.addEventListener('click', () => { ui.openSettingsModal(); });
+            document.getElementById('saveSettings')?.addEventListener('click', () => { ui.saveSettings(); });
+
+            // Edit Profile submission
+            const editProfileForm = document.getElementById('editProfileForm');
+            editProfileForm?.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const name = document.getElementById('editName').value.trim();
+                const bio = document.getElementById('editBio').value.trim();
+                const avatarInput = document.getElementById('editAvatar');
+                const file = avatarInput?.files?.[0];
+                try {
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = function(evt) {
+                            const dataUrl = evt.target.result;
+                            const success = auth.updateProfile({ name, bio, avatar: dataUrl });
+                            if (success) { ui.showNotification('Profile updated successfully!', 'success'); location.reload(); }
+                            else ui.showNotification('Failed to update profile', 'error');
+                        };
+                        reader.onerror = function() { ui.showNotification('Failed to read avatar file', 'error'); };
+                        reader.readAsDataURL(file);
+                    } else {
+                        const success = auth.updateProfile({ name, bio });
+                        if (success) { ui.showNotification('Profile updated successfully!', 'success'); location.reload(); }
+                        else ui.showNotification('Failed to update profile', 'error');
+                    }
+                } catch (err) { ui.showNotification('Failed to update profile', 'error'); }
+            });
+
+            // Edit Profile handling (submit already provided below), prefill fields when modal opens
+            // Validation + submit logic: reuse existing form handler added earlier
+
+            // Tab switching
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    btn.classList.add('active');
+                    const tabId = btn.dataset.tab;
+                    document.getElementById(`${tabId}Tab`)?.classList.add('active');
+                });
+            });
+
+            // Logout
+            document.getElementById('logoutBtn')?.addEventListener('click', () => {
+                auth.logout();
+                window.location.href = 'login.html';
+            });
+
+            // Theme toggle
+            document.getElementById('themeToggle')?.addEventListener('click', () => {
+                const currentTheme = document.body.classList.contains('dark-theme') ? 'light' : 'dark';
+                ui.setTheme(currentTheme);
+            });
+
+            // Simple search behavior: navigate to first matching user profile
+            document.getElementById('searchBtn')?.addEventListener('click', () => {
+                const q = (document.getElementById('searchInput')?.value || '').trim();
+                if (!q) return;
+                const results = auth.searchUsers(q);
+                if (results && results.length) {
+                    window.location.href = `profile.html?userId=${encodeURIComponent(results[0].id)}`;
+                } else {
+                    ui.showNotification('No users found', 'info');
+                }
+            });
+        });
+    </script>
 </body>
 </html>

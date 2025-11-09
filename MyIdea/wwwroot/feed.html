@@ -6,6 +6,7 @@
     <title>MyIdea - Feed</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="styles_feed.css">
+    <link rel="stylesheet" href="animations.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
 </head>
@@ -19,6 +20,12 @@
                 <a href="feed.html" class="nav-link active">
                     <i class="fas fa-home"></i> Feed
                 </a>
+                <div class="nav-search" style="margin:0 12px; flex:1; display:flex; justify-content:center;">
+                    <div class="search-box" style="position:relative; width:420px;">
+                        <input id="searchInput" type="search" placeholder="Search users, topics or tags..." aria-label="Search" style="width:100%; padding:8px 12px; border-radius:20px; border:1px solid var(--muted);">
+                        <div id="searchResults" class="search-results" style="position:absolute; top:42px; left:0; right:0; background:var(--surface); box-shadow:var(--shadow); border-radius:8px; display:none; z-index:50; max-height:280px; overflow:auto;"></div>
+                    </div>
+                </div>
                 <a href="profile.html" class="nav-link">
                     <i class="fas fa-user"></i> Profile
                 </a>
@@ -120,6 +127,16 @@
 
                     <div id="postsContainer" class="posts-container">
                         <!-- Posts will be dynamically added here -->
+                            <div class="comments-section">
+                                <div class="comment-input">
+                                    <textarea id="commentInput_{id}" class="form-control" 
+                                              rows="2" placeholder="Write a comment..."></textarea>
+                                    <button class="btn btn-primary mt-2" onclick="addComment('{id}')">
+                                        Comment
+                                    </button>
+                                </div>
+                                <div id="commentsList_{id}" class="comments-list mt-3"></div>
+                            </div>
                     </div>
                 </div>
 
@@ -168,6 +185,56 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <!-- Page Transition -->
+    <div class="page-transition" style="display: none;"></div>
+
+    <!-- Notification Container -->
+    <div class="notification-container" id="notificationContainer"></div>
+
+    <script src="ui.js"></script>
+    <!-- Load utilities first -->
+    <script src="js/security.js"></script>
+    <script src="js/validation.js"></script>
+    
+    <!-- Load services -->
+    <script src="js/auth.js"></script>
+    <script src="js/posts.js"></script>
+    
+    <!-- Load UI helpers -->
+    <script src="js/ui.js"></script>
+    
+    <!-- Load page controllers -->
+    <script src="js/feed.js"></script>
+    
+    <script>
+        // Security checks on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize auth service
+            const auth = window.authService;
+            
+            // Check authentication
+            if (!auth.getCurrentUser()) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            // Validate session security
+            if (!SecurityUtils.validateSession()) {
+                auth.logout();
+                return;
+            }
+
+            // Implement CSP
+            const meta = document.createElement('meta');
+            meta.httpEquiv = "Content-Security-Policy";
+            meta.content = SecurityUtils.getCSPHeaders()['Content-Security-Policy'];
+            document.head.appendChild(meta);
+
+            // Setup form validation
+            ValidationUtils.setupLiveValidation('postForm', {
+                postText: { required: true, maxLength: 5000 }
+            });
+        });
+    </script>
 </body>
 </html>

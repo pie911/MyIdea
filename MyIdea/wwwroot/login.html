@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MyIdea - Login</title>
     <link rel="stylesheet" href="styles.css">
-</head>
+    <link rel="stylesheet" href="animations.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 <body class="auth-page">
     <div class="auth-container">
         <div class="auth-card">
@@ -19,40 +20,71 @@
 
             <form id="loginForm" class="auth-form active">
                 <div class="form-group">
-                    <label for="loginEmail">Email</label>
+                    <label for="loginEmail">
+                        <i class="fas fa-envelope"></i> Email
+                    </label>
                     <input type="email" id="loginEmail" required>
                     <span class="error-message" id="loginEmailError"></span>
                 </div>
                 <div class="form-group">
-                    <label for="loginPassword">Password</label>
-                    <input type="password" id="loginPassword" required>
+                    <label for="loginPassword">
+                        <i class="fas fa-lock"></i> Password
+                    </label>
+                    <div class="password-input">
+                        <input type="password" id="loginPassword" required>
+                        <button type="button" class="password-toggle" aria-label="Toggle password visibility">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
                     <span class="error-message" id="loginPasswordError"></span>
                 </div>
-                <button type="submit" class="auth-btn">Login</button>
+                <button type="submit" class="auth-btn" id="loginSubmit">
+                    <i class="fas fa-sign-in-alt"></i> Login
+                </button>
             </form>
 
             <form id="registerForm" class="auth-form">
                 <div class="form-group">
-                    <label for="registerName">Full Name</label>
+                    <label for="registerName">
+                        <i class="fas fa-user"></i> Full Name
+                    </label>
                     <input type="text" id="registerName" required>
                     <span class="error-message" id="registerNameError"></span>
                 </div>
                 <div class="form-group">
-                    <label for="registerEmail">Email</label>
+                    <label for="registerEmail">
+                        <i class="fas fa-envelope"></i> Email
+                    </label>
                     <input type="email" id="registerEmail" required>
                     <span class="error-message" id="registerEmailError"></span>
                 </div>
                 <div class="form-group">
-                    <label for="registerPassword">Password</label>
-                    <input type="password" id="registerPassword" required minlength="8">
+                    <label for="registerPassword">
+                        <i class="fas fa-lock"></i> Password
+                    </label>
+                    <div class="password-input">
+                        <input type="password" id="registerPassword" required minlength="8">
+                        <button type="button" class="password-toggle" aria-label="Toggle password visibility">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
                     <span class="error-message" id="registerPasswordError"></span>
                 </div>
                 <div class="form-group">
-                    <label for="registerConfirmPassword">Confirm Password</label>
-                    <input type="password" id="registerConfirmPassword" required>
+                    <label for="registerConfirmPassword">
+                        <i class="fas fa-lock"></i> Confirm Password
+                    </label>
+                    <div class="password-input">
+                        <input type="password" id="registerConfirmPassword" required>
+                        <button type="button" class="password-toggle" aria-label="Toggle password visibility">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
                     <span class="error-message" id="registerConfirmPasswordError"></span>
                 </div>
-                <button type="submit" class="auth-btn">Register</button>
+                <button type="submit" class="auth-btn" id="registerSubmit">
+                    <i class="fas fa-user-plus"></i> Register
+                </button>
             </form>
 
             <div class="auth-footer">
@@ -82,6 +114,104 @@
         <div class="bubble bubble-5"></div>
     </div>
 
-    <script src="app.js"></script>
+    <!-- Page Transition -->
+    <div class="page-transition" style="display: none;"></div>
+
+    <!-- Notification Container -->
+    <div class="notification-container" id="notificationContainer"></div>
+
+    <script src="ui.js"></script>
+    <!-- Load utilities first -->
+    <script src="js/security.js"></script>
+    <script src="js/validation.js"></script>
+    
+    <!-- Load services -->
+    <script src="js/auth.js"></script>
+    
+    <!-- Load UI helpers -->
+    <script src="js/ui.js"></script>
+    
+    <script>
+        // Login/Register form handling
+        document.addEventListener('DOMContentLoaded', () => {
+            const loginForm = document.getElementById('loginForm');
+            const registerForm = document.getElementById('registerForm');
+            const loginTab = document.getElementById('loginTab');
+            const registerTab = document.getElementById('registerTab');
+
+            // Tab switching
+            loginTab?.addEventListener('click', () => {
+                loginTab.classList.add('active');
+                registerTab?.classList.remove('active');
+                loginForm?.classList.add('active');
+                registerForm?.classList.remove('active');
+            });
+
+            registerTab?.addEventListener('click', () => {
+                registerTab.classList.add('active');
+                loginTab?.classList.remove('active');
+                registerForm?.classList.add('active');
+                loginForm?.classList.remove('active');
+            });
+
+            // Login form submission
+            loginForm?.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const email = document.getElementById('loginEmail').value;
+                const password = document.getElementById('loginPassword').value;
+                const remember = document.getElementById('rememberSession')?.checked || false;
+
+                try {
+                    const success = await window.authService.login(email, password);
+                    if (success) {
+                        window.uiService.showNotification('Login successful!', 'success');
+                        setTimeout(() => window.location.href = 'feed.html', 1000);
+                    } else {
+                        window.uiService.showError('loginEmailError', 'Invalid email or password');
+                    }
+                } catch (error) {
+                    window.uiService.showError('loginEmailError', 'Login failed. Please try again.');
+                }
+            });
+
+            // Register form submission
+            registerForm?.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const name = document.getElementById('registerName').value.trim();
+                const email = document.getElementById('registerEmail').value.trim();
+                const password = document.getElementById('registerPassword').value;
+                const confirmPassword = document.getElementById('registerConfirmPassword').value;
+
+                if (password !== confirmPassword) {
+                    window.uiService.showError('registerPasswordError', 'Passwords do not match');
+                    return;
+                }
+
+                try {
+                    const success = await window.authService.register(name, email, password);
+                    if (success) {
+                        window.uiService.showNotification('Registration successful! Please log in.', 'success');
+                        loginTab?.click();
+                    } else {
+                        window.uiService.showError('registerEmailError', 'Registration failed. Please try again.');
+                    }
+                } catch (error) {
+                    window.uiService.showError('registerEmailError', error.message);
+                }
+            });
+
+            // Password visibility toggle
+            document.querySelectorAll('.password-toggle').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const input = e.target.closest('.password-input').querySelector('input');
+                    const type = input.type === 'password' ? 'text' : 'password';
+                    input.type = type;
+                    button.querySelector('i').className = `fas fa-${type === 'password' ? 'eye' : 'eye-slash'}`;
+                });
+            });
+        });
+    </script>
 </body>
 </html>
